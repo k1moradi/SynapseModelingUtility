@@ -17,4 +17,4 @@ Synaptic traces should be digitized in a specific way. Each synaptic event in a 
 An example of a digitized trace in Engauge digitizer:
 ![image](https://user-images.githubusercontent.com/18602635/59129236-3ca3ff80-893a-11e9-858d-bb6e74625ea6.png)
 
-CSV files should be imported to the program. Then users need to set parameters like synaptic reversal potential, postsynaptic membrane potential, input resistance, and capacitance. After pressing optimize button parameters of Tsodyks Markram are found by optimization the model parameters. You can save the results as JSON. Saving of multiple optimization results is allowed for bootstrapping purpose.
+CSV files should be imported to the program (start --> Open CSV files). Then users need to set parameters like synaptic reversal potential, postsynaptic membrane potential, input resistance, and capacitance. After pressing optimize button parameters of Tsodyks Markram are found by optimization the model parameters. You can save the results as JSON. Saving of multiple optimization results is allowed for bootstrapping purpose.
