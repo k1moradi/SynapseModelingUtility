@@ -14,4 +14,7 @@ psutil, sys, os, multiprocessing, queue, tkinter, matplotlib, pandas, math, scip
 ## How to use
 Synaptic traces should be digitized in a specific way. Each synaptic event in a trace should have strictly three points: (1) start, (2) peak, and (3) half-decay points. Digitized traces should be saved as CSV files and saved in the csvs folder you made in the installation step. The first column should be the time in milliseconds and the second column synaptic potential in millivolts or current in picoampere. We encourage using free and open source [Engauge digitizer](https://github.com/markummitchell/engauge-digitizer/releases) for digitization purpose.
 
+An example of a digitized trace in Engauge digitizer:
+![image](https://user-images.githubusercontent.com/18602635/59129236-3ca3ff80-893a-11e9-858d-bb6e74625ea6.png)
+
 CSV files should be imported to the program. Then users need to set parameters like synaptic reversal potential, postsynaptic membrane potential, input resistance, and capacitance. After pressing optimize button parameters of Tsodyks Markram are found by optimization the model parameters. You can save the results as JSON. Saving of multiple optimization results is allowed for bootstrapping purpose.
