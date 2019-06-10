@@ -628,9 +628,9 @@ class ExperimentVoltageClamp:
         self.BOUNDS = bounds
         self.initTimes = init_times.copy()  # [synTimes in ms]
         self.num_events = len(init_times) + 1
+        self.simulatedSignal, self.dataList, self.normalization_value = [0.0], None, None
         self.set_data(data_list)
         self.drivingForce = float(holding_potential) - float(synaptic_reversal_potential)  # in mV
-        self.simulatedSignal, self.dataList, self.normalization_value = [0.0], None, None
 
     def set_data(self, data_list):
         self.dataList = data_list.copy() # format [[t in ms, i in pA], ]
