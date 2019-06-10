@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from pandas import DataFrame, read_csv, read_json
 from my_scatter_matrix import scatter_matrix
 from math import exp, fabs, isnan, log
-from scipy.integrate import odeint
+from scipy.integrate import odeint, ode, Radau
 from scipy.optimize import differential_evolution
 from re import match, findall, split
 from time import time, sleep
@@ -46,7 +46,7 @@ class Experiment:
     CSVs_FOLDER = 'csvs'
     JSONs_FOLDER = 'jsons'
     KEYS = ['Erev', 'Vm', 'Rin', 'Cm', 'g_syn', 'tau_d', 'tau_r', 'tau_f', 'U']
-    UNITS = ['mV', 'mV', 'M'+u'\u2126', 'PF', 'nS', 'ms', 'ms', 'ms', '']
+    UNITS = ['mV', 'mV', 'M'+u'\u2126', 'pF', 'nS', 'ms', 'ms', 'ms', '']
     OPTIMIZATION = ['g_syn', 'tau_d', 'tau_r', 'tau_f', 'U', 'Rin', 'Cm']  # keep this order
     MAY_NEED_OPTIMIZATION = ['Cm', 'Rin']
     WORKING_DIRECTORY = '.'
@@ -526,7 +526,7 @@ class Experiment:
             fake_high_res_t_data = sorted([float(x) for x in range(int(self.get_t_data()[-1]))] + self.get_t_data())
             fake_high_res_data = [[t, 0] for t in fake_high_res_t_data]
             model = self.run_model()  # model should run after setting the entries
-            model.dataList = fake_high_res_data
+            model.set_data(fake_high_res_data)
             model.simulate(results.x)
             self.plot(self.plotModel, [row[0] for row in fake_high_res_data], model.simulatedSignal)
             self.bootstrap_counter.set(0)
@@ -626,13 +626,16 @@ class MultiProcessOptimization(Process):
 class ExperimentVoltageClamp:
     def __init__(self, data_list, init_times, synaptic_reversal_potential, holding_potential, bounds):
         self.BOUNDS = bounds
-        self.dataList = data_list  # format [[t in ms, i in pA], ]
-        self.initTimes = init_times  # [synTimes in ms]
+        self.initTimes = init_times.copy()  # [synTimes in ms]
         self.num_events = len(init_times) + 1
+        self.set_data(data_list)
         self.drivingForce = float(holding_potential) - float(synaptic_reversal_potential)  # in mV
-        self.simulatedSignal = [0.0]
-        amp = fabs(self.dataList[0][1] - self.dataList[1][1])
-        self.normalization_value = (amp if amp != 0.0 else 1.0)*(self.num_events if self.num_events != 0 else 1.0)
+        self.simulatedSignal, self.dataList, self.normalization_value = [0.0], None, None
+
+    def set_data(self, data_list):
+        self.dataList = data_list.copy() # format [[t in ms, i in pA], ]
+        amp = fabs(data_list[0][1] - data_list[1][1])
+        self.normalization_value = (amp if amp != 0.0 else 1.0) * (self.num_events if self.num_events != 0 else 1.0)
 
     def simulate(self, input_vec):
         g0, tau_d, tau_r, tau_f, u = input_vec
@@ -721,7 +724,7 @@ class ExperimentVoltageClamp:
                 delta_init_signal_next = simulated_vs_recorded_diff_at_initiation_points[0]
 
         if len(corrected_signal) == len(self.dataList):
-            self.dataList = corrected_data
+            self.set_data(corrected_data)
         else:
             raise Exception
         return corrected_signal
@@ -731,17 +734,25 @@ class ExperimentCurrentClamp:
     def __init__(self, data_list, init_times, synaptic_reversal_potential, membrane_potential,
                  input_resistance, membrane_capacitance, bounds):
         self.BOUNDS = bounds
-        self.dataList = data_list  # format [[t in ms, membrane potential in pA], ]
         self.initTimes = init_times  # [synTimes in ms]
         self.num_events = len(init_times) + 1
+        self.dataList, self.normalization_value = None, None
+        self.set_data(data_list)
         self.synapticReversalPotential = float(synaptic_reversal_potential)  # in mV
         self.V0 = self.leakReversalPotential = float(membrane_potential)  # in mV
-        # input_resistance in MegaOhm -> leak in nanoSiemens -> normalize by membrane_capacitance
-        self.leakConductanceBar = 1/float(input_resistance) * 1e3/float(membrane_capacitance)
+        # input_resistance in MegaOhm -> leak in MegaOhm -> normalize by membrane_capacitance
         self.membraneCapacitance = float(membrane_capacitance)  # in pF
+        self.leakConductanceBar = 1e3/self.membraneCapacitance/float(input_resistance)
         self.simulatedSignal = []
         self.g0, self.tau_d, self.tau_d, self.tau_f, self.tau_r, self.U = None, None, None, None, None, None
-        amp = fabs(self.dataList[0][1] - self.dataList[1][1])
+
+    def set_data(self, data_list):
+        self.dataList = data_list.copy()  # format [[t in ms, membrane potential in pA], ]
+        # add two time points before and after the pick of first signal to check the overshooting of simulatedSignal
+        self.dataList.insert(2, [data_list[1][0] + (data_list[2][0] - data_list[1][0]) / 50, None])
+        self.dataList.insert(1, [(data_list[1][0] + data_list[0][0]) / 2, (data_list[1][1] + data_list[0][1]) / 2])
+        # calculate peak
+        amp = fabs(data_list[0][1] - data_list[1][1])
         self.normalization_value = (amp if amp != 0.0 else 1.0) * (self.num_events if self.num_events != 0 else 1.0)
 
     def input_parser(self, input_vec):
@@ -755,7 +766,10 @@ class ExperimentCurrentClamp:
     def interevent_signal(self, signal_init, delta_ts, g):
         signal = odeint(cell, signal_init, delta_ts,
                         args=(g, self.tau_d, self.leakConductanceBar, self.leakReversalPotential,
-                              self.synapticReversalPotential)
+                              self.synapticReversalPotential),
+                        col_deriv=True,
+                        rtol=1e-40,
+                        h0=1e-20
                         ).ravel().tolist()
         del signal[0]
         return signal
@@ -765,11 +779,8 @@ class ExperimentCurrentClamp:
         error, x0, y0, u0, delta_t = 0.0, 1.0, 0.0, 0.0, 0.0
         g, x0, y0, u0 = synaptic_event(delta_t, self.g0, self.tau_d, self.tau_r, self.tau_f, self.U, u0, x0, y0)
         init_times, data = self.initTimes.copy(), self.dataList.copy()
-        init_time, signal, delta_ts, epsilon = init_times[0], [self.V0], [], (data[1][0] - data[0][0]) / 10  # ms
+        init_time, signal, delta_ts = init_times[0], [self.V0], []  # ms
         del init_times[0]
-        # add two time points before and after the pick of first signal to check the overshooting of simulatedSignal
-        data.insert(2, [data[1][0] + epsilon, None])
-        data.insert(1, [data[1][0] - epsilon, None])
         for dataPoint in data:
             delta_t = dataPoint[0] - init_time
             if delta_t < 0:
@@ -799,22 +810,23 @@ class ExperimentCurrentClamp:
         else:
             raise Exception
         # penalize the data pick not match signal pick
-        error += 0.0 if signal[1] <= signal[2] >= signal[3] else 1.0
-        del signal[3], signal[1]
         error /= self.normalization_value
-        if self.num_events == 2:
-            error += (1 - self.U/self.BOUNDS[4][1]) * error
+        error += (1 - self.U/self.BOUNDS[4][1]) * error if self.num_events == 2 else 0
+        error += 0.0 if signal[1]**2 < signal[2]**2 > signal[3]**2 else 10.0
+        del signal[3], signal[1]
         self.simulatedSignal = signal
         return error
 
     def correct_data(self):
         # make an array of difference between simulated and recorded initiation times
         init_times = self.initTimes.copy()
-        init_times.append(self.dataList[-1][0])
+        data = self.dataList.copy()
+        del data[3], data[1]
+        init_times.append(data[-1][0])
         init_time = init_times[0]
         del init_times[0]
         simulated_vs_recorded_diff_at_initiation_points = []
-        for t, signal, simulated_signal in zip(*zip(*self.dataList), self.simulatedSignal):
+        for t, signal, simulated_signal in zip(*zip(*data), self.simulatedSignal):
             if t == init_time:
                 simulated_vs_recorded_diff_at_initiation_points.append(simulated_signal - signal)
                 if init_times:
@@ -822,17 +834,16 @@ class ExperimentCurrentClamp:
                     del init_times[0]
 
         # start correcting data
-        corrected_signal = []
-        corrected_data = []
+        corrected_signal, corrected_data = [], []
         init_times = self.initTimes.copy()
-        init_times.append(self.dataList[-1][0])
+        init_times.append(data[-1][0])
         init_time = init_times[0]
         del init_times[0]
         delta_init_t = init_times[0] - init_time
         delta_init_signal = simulated_vs_recorded_diff_at_initiation_points[0]
         del simulated_vs_recorded_diff_at_initiation_points[0]
         delta_init_signal_next = simulated_vs_recorded_diff_at_initiation_points[0]
-        for t, signal in self.dataList:
+        for t, signal in data:
             delta_t = t - init_time
 
             if t < init_time:
@@ -853,9 +864,8 @@ class ExperimentCurrentClamp:
                 delta_init_signal = simulated_vs_recorded_diff_at_initiation_points[0]
                 del simulated_vs_recorded_diff_at_initiation_points[0]
                 delta_init_signal_next = simulated_vs_recorded_diff_at_initiation_points[0]
-
-        if len(corrected_signal) == len(self.dataList):
-            self.dataList = corrected_data
+        if len(corrected_data) == len(data):
+            self.set_data(corrected_data)
         else:
             raise Exception
         return corrected_signal
