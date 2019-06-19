@@ -9,7 +9,8 @@ This tool is a simple GUI that helps simulate synaptic electrophysiology recordi
 The program is tested on standard python 3 [anaconda distribution](https://www.anaconda.com/distribution/). If you use anaconda all the dependencies will be taken care of. Then, just copy Main.py and my_scatter_matrix.py files in a folder on your computer, and create two subfolders named "csvs" and "jsons" in it and run the Main.py.
 
 ## Dependencies:
-psutil, matplotlib, pandas, math, scipy, numba, numpy, sys, os multiprocessing, queue, tkinter, re, and time
+psutil, matplotlib, pandas, math, scipy, numba, numpy, sys, os multiprocessing, queue, tkinter, re, and time.
+
 |module name|tested version|
 |---|---|
 |psutil|5.6.2|
