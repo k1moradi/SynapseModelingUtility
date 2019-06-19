@@ -13,6 +13,7 @@ psutil, matplotlib, pandas, math, scipy, numba, numpy, sys, os multiprocessing, 
 
 |module name|tested version|
 |---|---|
+|Python|3.7.3|
 |psutil|5.6.2|
 |matplotlib|3.1.0|
 |pandas|0.24.2|
