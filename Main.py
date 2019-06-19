@@ -19,7 +19,7 @@ from my_scatter_matrix import scatter_matrix
 from math import exp, fabs, isnan, log
 from scipy.integrate import odeint, ode, Radau
 from scipy.optimize import differential_evolution
-from re import match, findall, split
+from re import match, findall, split, search
 from time import time, sleep
 from numba import jit
 import numpy as np
@@ -85,8 +85,8 @@ class Experiment:
         parameters['tau_r_min'] = 1.0
         parameters['U_min'] = 0.001
 
-        parameters['Rin_max'] = 400.0
-        parameters['Cm_max'] = 400.0
+        parameters['Rin_max'] = 800.0
+        parameters['Cm_max'] = 1000.0
         parameters['g_syn_max'] = 30.0
         parameters['tau_d_max'] = 30.0
         parameters['tau_f_max'] = 30000.0
@@ -130,8 +130,41 @@ class Experiment:
             signal=data_frame.signal - signal_correction)
 
     @staticmethod
+    def add_helper_points(data_frame):
+        data = data_frame.values.tolist()
+        resting_membrane_potential = data[0][1]
+        data_sliced = list(Main.chunks(data, 3))
+        output = []
+        for idx, data_list in enumerate(data_sliced):
+            if idx == len(data_sliced)-1:
+                continue
+            corrected_data = data_list.copy()
+            if len(data_list) >= 2:
+                near_pick_amplitude = data_list[0][1] + (data_list[1][1] - data_list[0][1]) * 0.95
+                delta_t = (data_list[1][0] - data_list[0][0]) / 5
+                corrected_data.insert(1, [data_list[1][0] - delta_t, near_pick_amplitude])
+                corrected_data.insert(3, [data_list[1][0] + delta_t, np.interp(
+                    data_list[1][0] + delta_t,
+                    xp=[corrected_data[i][0] for i in range(4)],
+                    fp=[corrected_data[i][1] for i in range(4)]
+                )])
+                pseudo_decay_t, i = data_list[2][0] + (data_list[2][0] - data_list[1][0]) / 2, 2
+                while pseudo_decay_t > data_sliced[idx+1][0][0]:
+                    i += 1
+                    pseudo_decay_t = data_list[2][0] + (data_list[2][0] - data_list[1][0]) / i
+                (t_rise, a_rise), (t_decay, a_decay) = corrected_data[3], data_list[2]
+                a_rise -= resting_membrane_potential
+                a_decay -= resting_membrane_potential
+                tau = (t_decay - t_rise) / (log(fabs(a_rise)) - log(fabs(a_decay)))
+                decay_amplitude = resting_membrane_potential + a_rise * exp(-(pseudo_decay_t - t_rise) / tau)
+                corrected_data.insert(5, [pseudo_decay_t, decay_amplitude])
+            output += corrected_data
+        if len(data_sliced[-1]) < 3:
+            output += data_sliced[-1]
+        return DataFrame(output, columns=['time', 'signal'])
+
+    @staticmethod
     def initiation_points(mode, time_list, signal_list):
-        # return time_list[1:len(time_list) - 1:3], signal_list[1:len(signal_list) - 1:3]
         if mode == "current-clamp":
             return time_list[0:len(time_list) - 1:3], signal_list[0:len(signal_list) - 1:3]
         elif mode == "voltage-clamp":
@@ -259,13 +292,8 @@ class Experiment:
         Experiment.rowCount += 1
         # make a Tcl wrapper around is_float function so that tk can use it as a command
         Experiment.IS_FLOAT = parent.register(Experiment.is_float)
-
         self.FILE_NAME = file_name
-
         self.parameters = Experiment.set_initial_parameters_values(file_name)
-
-        data = Experiment.get_csv_file_as_data_frame(file_name)
-        data = Experiment.correct_digitization(data, self.parameters['Mode'], self.parameters['Vm'])
 
         self.experimentFrame = Frame(parent)
         self.experimentFrame.grid(row=Experiment.rowCount, column=0, sticky='NESW')
@@ -350,11 +378,10 @@ class Experiment:
         self.canvas.get_tk_widget().grid(row=0, column=1, rowspan=len(self.KEYS), sticky='NSEW')
         self.experimentFrame.columnconfigure(1, weight=1)
         self.experimentFrame.rowconfigure(1, weight=1)
-        [t_init, y_init] = Experiment.initiation_points(self.parameters['Mode'], data.time, data.signal)
-        self.plotData, = self.subplot.plot(data.time, data.signal, '--bo', color='blue', label='Data')
+        self.plotData, = self.subplot.plot([], [], '--bo', color='blue', label='Data')
         self.plotModel, = self.subplot.plot([], [], '-X', color='red', label='Model')
         self.plotCorrectedSignal, = self.subplot.plot([], [], '-.bo', color='green', label='Corrected Data')
-        self.plotInitTimes, = self.subplot.plot(t_init, y_init, 'P', color='magenta', label='Init')
+        self.plotInitTimes, = self.subplot.plot([], [], 'P', color='magenta', label='Init')
         self.subplot.set_title(self.FILE_NAME, fontsize=14, x=0.8, y=1)
         self.subplot.set_autoscale_on(True)
         self.subplot.set_ylabel(Experiment.signal_label(self.parameters['Mode']), fontsize=12)
@@ -369,9 +396,16 @@ class Experiment:
             relx=0.0, rely=0.0, anchor="se", width=500, y=33,
             x=width * 3 * 19 + 3 if self.experimentFrame.winfo_screenwidth() > 1280 else width * 3 * 18 + 3)
         NavigationToolbar2Tk(self.canvas, self.toolbarFrame).configure(bg='white')
+        self.queue = Queue()  # needed for multi-threading
 
-        # needed for multi-threading
-        self.queue = Queue()
+    def destroy(self):
+        self.experimentFrame.grid_forget()
+        self.experimentFrame.destroy()
+        Experiment.rowCount -= 1
+        messagebox.showerror(
+            title='Error',
+            message='Please check the file:\n%s.csv' % self.FILE_NAME
+        )
 
     def plot(self, plot_obj, x, y):
         plot_obj.set_xdata(x)
@@ -394,7 +428,9 @@ class Experiment:
         data = Experiment.get_csv_file_as_data_frame(self.FILE_NAME)
         data = Experiment.correct_digitization(data, self.parameters['Mode'], self.parameters['Vm'])
         [t, y] = Experiment.initiation_points(self.parameters['Mode'], data.time, data.signal)
-        # since the data stored in the plots are accessible we do not need to store is somewhere else
+        if self.parameters['Mode'] == 'current-clamp':
+            data = Experiment.add_helper_points(data)
+        # since the data stored in the plots are accessible we do not need to store them somewhere else
         self.plot(self.plotCorrectedSignal, [], [])
         self.plot(self.plotInitTimes, t, y)
         self.plot(self.plotData, data.time, data.signal)
@@ -572,11 +608,13 @@ class Experiment:
 
     def plot_saved_results(self):
         data = self.get_ty_data()
-        (t0, y0), (t1, y1) = data[0], data[1]
-        amplitude, ppr,  isi = y1-y0, None, None
-        if len(data) > 4 and amplitude != 0.0:
-            (t3, y3), (t4, y4) = data[3], data[4]
-            ppr, isi = abs((y4 - y3) / amplitude), t4 - t1
+        peak_idx, second_event_start_index = (2, 6) if self.parameters['Mode'] == 'current-clamp' else (1, 3)
+        (t0, y0), (t_peak, y_peak) = data[0], data[peak_idx]
+        amplitude, ppr,  isi = y_peak-y0, None, None
+        if len(data) > (second_event_start_index + peak_idx) and amplitude != 0.0:
+            second_t0, second_y0 = data[second_event_start_index]
+            second_t_peak, second_y_peak = data[second_event_start_index+peak_idx]
+            ppr, isi = abs((second_y_peak - second_y0) / amplitude), second_t_peak - t_peak
         Experiment.plot_saved_results_(self.FILE_NAME, Toplevel(self.experimentFrame), amplitude, ppr, isi)
 
 
@@ -623,7 +661,30 @@ class MultiProcessOptimization(Process):
         self.queue.put([results, corrected_signal, round(time() - t, 2)])
 
 
+@jit(nopython=True, fastmath=True, cache=True)
+def synaptic_event(delta_t, g0, tau_d, tau_r, tau_f, u, u0, x0, y0):
+    tau1r = tau_d / ((tau_d - tau_r) if tau_d != tau_r else 1e-13)
+    y_ = y0 * exp(-delta_t / tau_d)
+    x_ = 1 + (x0 - 1 + tau1r * y0) * exp(-delta_t / tau_r) - tau1r * y_
+    u_ = u0 * exp(-delta_t / tau_f)
+    u0 = u_ + u * (1 - u_)
+    y0 = y_ + u0 * x_
+    x0 = x_ - u0 * x_
+    g = g0 * y0
+    return g, x0, y0, u0
+
+
 class ExperimentVoltageClamp:
+    @staticmethod
+    @jit(nopython=True, fastmath=True, cache=True)
+    def synaptic_current(g, delta_t, tau_d, e_syn):
+        return g * exp(-delta_t / tau_d) * e_syn
+
+    @staticmethod
+    @jit(nopython=True, fastmath=True, cache=True)
+    def soft_l1_loss(data_signal, model_signal, error_weight):  # smoothed least square function
+        return (2.0 * ((1.0 + (data_signal - model_signal) ** 2.0) ** 0.5) - 1.0) * error_weight
+
     def __init__(self, data_list, init_times, synaptic_reversal_potential, holding_potential, bounds):
         self.BOUNDS = bounds
         self.initTimes = init_times.copy()  # [synTimes in ms]
@@ -633,7 +694,7 @@ class ExperimentVoltageClamp:
         self.drivingForce = float(holding_potential) - float(synaptic_reversal_potential)  # in mV
 
     def set_data(self, data_list):
-        self.dataList = data_list.copy() # format [[t in ms, i in pA], ]
+        self.dataList = data_list.copy()  # format [[t in ms, i in pA],]
         amp = fabs(data_list[0][1] - data_list[1][1])
         self.normalization_value = (amp if amp != 0.0 else 1.0) * (self.num_events if self.num_events != 0 else 1.0)
 
@@ -656,14 +717,13 @@ class ExperimentVoltageClamp:
                 g, x0, y0, u0 = synaptic_event(delta_t, g0, tau_d, tau_r, tau_f, u, u0, x0, y0)
                 init_time, delta_t, error_weight = init_times[0], 0.0, 1.0
                 del init_times[0]
-            signal.append(synaptic_current(g, delta_t, tau_d, self.drivingForce))
+            signal.append(ExperimentVoltageClamp.synaptic_current(g, delta_t, tau_d, self.drivingForce))
             if not isnan(data_signal):
-                error = soft_l1_loss(error, signal[-1], data_signal, error_weight)
+                error += ExperimentVoltageClamp.soft_l1_loss(signal[-1], data_signal, error_weight)
             error_weight /= self.num_events
             self.simulatedSignal = signal
         error /= self.normalization_value
-        if self.num_events == 2:
-            error += (1 - u/self.BOUNDS[4][1]) * error
+        error += ((1 - u/self.BOUNDS[4][1]) * error) if self.num_events == 2 else 0
         return error
 
     def correct_data(self):
@@ -731,29 +791,53 @@ class ExperimentVoltageClamp:
 
 
 class ExperimentCurrentClamp:
+    @staticmethod
+    @jit(nopython=True, fastmath=True, cache=True)
+    def cell(v, t, g, tau_d, g_leak, e_leak, e_syn):
+        return g_leak * (e_leak - v) + g * exp(-t / tau_d) * (e_syn - v)
+
+    @staticmethod
+    @jit(nopython=True, fastmath=True, cache=True, parallel=False)
+    def sum_soft_l1_loss(data_signal, model_signal, error_weight):  # smoothed least square function
+        return np.nansum((2.0 * ((1.0 + (data_signal - model_signal) ** 2.0) ** 0.5) - 1.0) * error_weight)
+
     def __init__(self, data_list, init_times, synaptic_reversal_potential, membrane_potential,
                  input_resistance, membrane_capacitance, bounds):
         self.BOUNDS = bounds
         self.initTimes = init_times  # [synTimes in ms]
         self.num_events = len(init_times) + 1
-        self.dataList, self.normalization_value = None, None
-        self.set_data(data_list)
+        self.dataList, self.errorWeightsList, self.normalization_value, self.dataSignal = None, [], None, None
+        self.membraneCapacitance = float(membrane_capacitance)  # in pF
+        self.inputResistance = float(input_resistance)
+        # input_resistance in MegaOhm -> leak in MegaOhm -> normalize by membrane_capacitance
+        self.leakConductanceBar = 1e3 / self.membraneCapacitance / self.inputResistance
         self.synapticReversalPotential = float(synaptic_reversal_potential)  # in mV
         self.V0 = self.leakReversalPotential = float(membrane_potential)  # in mV
-        # input_resistance in MegaOhm -> leak in MegaOhm -> normalize by membrane_capacitance
-        self.membraneCapacitance = float(membrane_capacitance)  # in pF
-        self.leakConductanceBar = 1e3/self.membraneCapacitance/float(input_resistance)
-        self.simulatedSignal = []
+        self.simulatedSignal, self.delta_ts_list, self.delta_ts_last, self.simulatedSignalHead = [], None, None, None
         self.g0, self.tau_d, self.tau_d, self.tau_f, self.tau_r, self.U = None, None, None, None, None, None
+        self.set_data(data_list)
 
     def set_data(self, data_list):
+        amp = data_list[1][1] - data_list[0][1]  # calculate peak
+        self.normalization_value = (fabs(amp) if amp != 0.0 else 1.0)*(self.num_events if self.num_events != 0 else 1.0)
         self.dataList = data_list.copy()  # format [[t in ms, membrane potential in pA], ]
-        # add two time points before and after the pick of first signal to check the overshooting of simulatedSignal
-        self.dataList.insert(2, [data_list[1][0] + (data_list[2][0] - data_list[1][0]) / 50, None])
-        self.dataList.insert(1, [(data_list[1][0] + data_list[0][0]) / 2, (data_list[1][1] + data_list[0][1]) / 2])
-        # calculate peak
-        amp = fabs(data_list[0][1] - data_list[1][1])
-        self.normalization_value = (amp if amp != 0.0 else 1.0) * (self.num_events if self.num_events != 0 else 1.0)
+        self.dataSignal = np.array([data_list[i][1] for i in range(len(data_list))], dtype='float')
+        self.errorWeights = np.array([(idx % 2 + 1) / 2 for idx in range(1, len(data_list)+1)], dtype='float')
+        self.delta_ts_list, self.simulatedSignalHead = [], np.array([self.V0], dtype='float')
+        init_times, data = self.initTimes.copy(), data_list.copy()
+        init_time, delta_ts = init_times[0], []
+        del init_times[0]
+        for dataPoint in data:
+            delta_t = dataPoint[0] - init_time
+            if delta_t < 0:
+                self.simulatedSignalHead = np.append(self.simulatedSignalHead, self.V0)
+                continue
+            delta_ts.append(delta_t)
+            if init_times and dataPoint[0] >= init_times[0]:
+                self.delta_ts_list.append(delta_ts)
+                init_time, delta_ts = init_times[0], [0.0]
+                del init_times[0]
+        self.delta_ts_last = delta_ts
 
     def input_parser(self, input_vec):
         # This function separated for overloading purpose
@@ -764,56 +848,29 @@ class ExperimentCurrentClamp:
         self.U = input_vec[4]
 
     def interevent_signal(self, signal_init, delta_ts, g):
-        signal = odeint(cell, signal_init, delta_ts,
+        signal = odeint(ExperimentCurrentClamp.cell, signal_init, delta_ts,
                         args=(g, self.tau_d, self.leakConductanceBar, self.leakReversalPotential,
                               self.synapticReversalPotential),
                         col_deriv=True,
                         rtol=1e-40,
                         h0=1e-20
-                        ).ravel().tolist()
-        del signal[0]
-        return signal
+                        ).ravel()
+        return np.delete(signal, 0)
 
     def simulate(self, input_vec):
         self.input_parser(input_vec)
         error, x0, y0, u0, delta_t = 0.0, 1.0, 0.0, 0.0, 0.0
         g, x0, y0, u0 = synaptic_event(delta_t, self.g0, self.tau_d, self.tau_r, self.tau_f, self.U, u0, x0, y0)
-        init_times, data = self.initTimes.copy(), self.dataList.copy()
-        init_time, signal, delta_ts = init_times[0], [self.V0], []  # ms
-        del init_times[0]
-        for dataPoint in data:
-            delta_t = dataPoint[0] - init_time
-            if delta_t < 0:
-                signal.append(self.V0)
-                continue
-            delta_ts.append(delta_t)
-            if init_times and dataPoint[0] >= init_times[0]:
-                signal += self.interevent_signal(signal[-1], delta_ts, g)
-                g, x0, y0, u0 = synaptic_event(delta_t, self.g0, self.tau_d, self.tau_r, self.tau_f, self.U, u0, x0, y0)
-                init_time, delta_ts = init_times[0], [0.0]
-                del init_times[0]
-        signal += self.interevent_signal(signal[-1], delta_ts, g)
+        signal = self.simulatedSignalHead.copy()
+        for delta_ts in self.delta_ts_list:
+            signal = np.append(signal, self.interevent_signal(signal[-1], delta_ts, g))
+            g, x0, y0, u0 = synaptic_event(
+                delta_ts[-1], self.g0, self.tau_d, self.tau_r, self.tau_f, self.U, u0, x0, y0)
+        signal = np.append(signal, self.interevent_signal(signal[-1], self.delta_ts_last, g))
         # calculate error
-        init_times = self.initTimes.copy()
-        init_time, error_weight = init_times[0], 1.0
-        del init_times[0]
-        if len(signal) == len(data):
-            for data_time, data_signal, model_signal in zip(*zip(*data), signal):
-                if data_signal is None or isnan(data_signal):
-                    continue
-                if init_times and (init_time - 0.05) <= data_time < (init_time + 0.05):
-                    init_time, error_weight = init_times[0], 1.0
-                    del init_times[0]
-                else:
-                    error = soft_l1_loss(error, data_signal, model_signal, error_weight)
-                    error_weight /= self.num_events
-        else:
-            raise Exception
-        # penalize the data pick not match signal pick
+        error = ExperimentCurrentClamp.sum_soft_l1_loss(self.dataSignal, signal, self.errorWeights)
         error /= self.normalization_value
         error += (1 - self.U/self.BOUNDS[4][1]) * error if self.num_events == 2 else 0
-        error += 0.0 if signal[1]**2 < signal[2]**2 > signal[3]**2 else 10.0
-        del signal[3], signal[1]
         self.simulatedSignal = signal
         return error
 
@@ -821,7 +878,6 @@ class ExperimentCurrentClamp:
         # make an array of difference between simulated and recorded initiation times
         init_times = self.initTimes.copy()
         data = self.dataList.copy()
-        del data[3], data[1]
         init_times.append(data[-1][0])
         init_time = init_times[0]
         del init_times[0]
@@ -1059,6 +1115,7 @@ class Main(ScrollableFrame):
         menu.add_command(label="Options", command=self.options)
         menu.add_command(label="Calculator", command=self.calculator)
         menu.add_command(label="Close-the-last", command=self.close_last)
+        self.bind('<Control-o>', self.open)
         self.bind('<Control-w>', self.close_last)
 
         self.config(menu=menu)
@@ -1091,34 +1148,46 @@ class Main(ScrollableFrame):
         return data
 
     def append_experiment(self, file_name):
-        try:
-            self.experiments.append(Experiment(self.mainFrame, file_name))
-        except TypeError:
+        path_ = Experiment.WORKING_DIRECTORY + '\\' + Experiment.CSVs_FOLDER + '\\'
+        file_content = open(path_ + file_name + '.csv').read()
+        if not bool(search(r'\n{2,}', file_content)):
+            experiment = Experiment(self.mainFrame, file_name)
+            try:
+                experiment.reload_data()
+                self.experiments.append(experiment)
+            except ValueError:
+                experiment.destroy()
+                del experiment
+        else:
             ok = messagebox.askokcancel(
                 title='Error',
                 message='The %s.csv file is probably containing multiple traces\n' % file_name +
                         'Do you want to try to split it into multiple files?')
             if ok:
-                try:
-                    path_ = Experiment.WORKING_DIRECTORY + '\\' + Experiment.CSVs_FOLDER + '\\'
-                    for sections in filter(None, split(r'\n{2,}', open(path_ + file_name + '.csv').read())):
-                        col_name = findall(r'^.+?,(.+?)\n', sections)[0]
-                        new_file_name = file_name + '-' + col_name
-                        open(path_ + new_file_name + '.csv', 'w').write(sections)
-                        self.experiments.append(Experiment(self.mainFrame, new_file_name))
-                    self.update_scrollbar()
-                    Experiment.delete_file_(
-                        file_name, '.csv',
-                        'File splitting was successful.\n'
-                        'Do you want to delete %s.csv file?' % file_name)
-                except Exception as e:
-                    print(e)
-                    messagebox.showerror(
-                        title='Error',
-                        message='Please check the file:\n%s.csv' % file_name
-                    )
+                for sections in filter(None, split(r'\n{2,}', file_content)):
+                    col_name = findall(r'^.+?,(.+?)\n', sections)[0]
+                    new_file_name = file_name + '-' + col_name
+                    open(path_ + new_file_name + '.csv', 'w').write(sections)
+                    experiment = Experiment(self.mainFrame, new_file_name)
+                    try:
+                        experiment.reload_data()
+                        self.experiments.append(experiment)
+                    except ValueError:
+                        experiment.destroy()
+                        del experiment
+                self.update_scrollbar()
+                Experiment.delete_file_(
+                    file_name, '.csv',
+                    'File splitting was successful.\n'
+                    'Do you want to delete %s.csv file?' % file_name)
+        # except Exception as e:
+        #     print(e)
+        #     messagebox.showerror(
+        #         title='Error',
+        #         message='Please check the file:\n%s.csv\n\n%s' % (file_name, e)
+        #     )
 
-    def open(self):
+    def open(self, event=None):
         path_file_names = filedialog.askopenfilenames(
             initialdir=Main.CSVs_FOLDER,
             title="Choose CSV files",
@@ -1331,34 +1400,6 @@ class Main(ScrollableFrame):
             del self.experiments[-1]
             Experiment.rowCount -= 1
             self.update_scrollbar()
-
-
-@jit(nopython=True, fastmath=True, cache=True)
-def synaptic_event(delta_t, g0, tau_d, tau_r, tau_f, u, u0, x0, y0):
-    tau1r = tau_d / ((tau_d - tau_r) if tau_d != tau_r else 1e-13)
-    y_ = y0 * exp(-delta_t / tau_d)
-    x_ = 1 + (x0 - 1 + tau1r * y0) * exp(-delta_t / tau_r) - tau1r * y_
-    u_ = u0 * exp(-delta_t / tau_f)
-    u0 = u_ + u * (1 - u_)
-    y0 = y_ + u0 * x_
-    x0 = x_ - u0 * x_
-    g = g0 * y0
-    return g, x0, y0, u0
-
-
-@jit(nopython=True, fastmath=True, cache=True)
-def synaptic_current(g, delta_t, tau_d, e_syn):
-    return g * exp(-delta_t / tau_d) * e_syn
-
-
-@jit(nopython=True, fastmath=True, cache=True)
-def cell(v, t, g, tau_d, g_leak, e_leak, e_syn):
-    return g_leak * (e_leak - v) + g * exp(-t / tau_d) * (e_syn - v)
-
-
-@jit(nopython=True, fastmath=True, cache=True)
-def soft_l1_loss(error, data_signal, model_signal, error_weight):  # smoothed least square function
-    return error + (2.0*((1.0+(data_signal - model_signal)**2.0)**0.5)-1.0)*error_weight
 
 
 # Required for multi-threading on windows
