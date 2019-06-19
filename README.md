@@ -8,10 +8,10 @@ This tool is a simple GUI that helps simulate synaptic electrophysiology recordi
 ## Installation
 The program is tested on standard python 3 [anaconda distribution](https://www.anaconda.com/distribution/). If you use anaconda all the dependencies will be taken care of. Then, just copy Main.py and my_scatter_matrix.py files in a folder on your computer, and create two subfolders named "csvs" and "jsons" in it and run the Main.py.
 
-## Dependencies:
+## Module Dependencies:
 psutil, matplotlib, pandas, math, scipy, numba, numpy, sys, os multiprocessing, queue, tkinter, re, and time.
 
-|module name|tested version|
+|module|tested version|
 |---|---|
 |Python|3.7.3|
 |psutil|5.6.2|
@@ -20,6 +20,8 @@ psutil, matplotlib, pandas, math, scipy, numba, numpy, sys, os multiprocessing, 
 |scipy|1.2.1|
 |numba|0.43.1|
 |numpy|1.16.4|
+|tk|8.6.8|
+
 
 ## How to use
 Synaptic traces should be digitized in a specific way. Each synaptic event in a trace should have strictly three points: (1) initiation, (2) peak, and (3) decay points. Digitized traces should be saved as CSV files and put in the csvs folder you made earlier. The first column of CSV file should be the time in milliseconds and the second column synaptic potential in millivolts or current in picoampere. We encourage using free and open source [Engauge digitizer](https://github.com/markummitchell/engauge-digitizer/releases) for digitization purpose.
