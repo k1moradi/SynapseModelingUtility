@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from pandas import DataFrame, read_csv, read_json
 from my_scatter_matrix import scatter_matrix
 from math import exp, fabs, isnan, log
-from scipy.integrate import odeint, ode, Radau
+from scipy.integrate import odeint
 from scipy.optimize import differential_evolution
 from re import match, findall, split, search
 from time import time, sleep
@@ -395,7 +395,8 @@ class Experiment:
         self.toolbarFrame.place(
             relx=0.0, rely=0.0, anchor="se", width=500, y=33,
             x=width * 3 * 19 + 3 if self.experimentFrame.winfo_screenwidth() > 1280 else width * 3 * 18 + 3)
-        NavigationToolbar2Tk(self.canvas, self.toolbarFrame).configure(bg='white')
+        self.toolbar = NavigationToolbar2Tk(self.canvas, self.toolbarFrame)
+        self.toolbar.configure(bg='white')
         self.queue = Queue()  # needed for multi-threading
 
     def destroy(self, e=None):
@@ -406,7 +407,7 @@ class Experiment:
             )
         self.experimentFrame.grid_forget()
         self.experimentFrame.destroy()
-        Experiment.rowCount -= 1
+        Experiment.rowCount -= 1 if Experiment.rowCount > 0 else 0
 
     def plot(self, plot_obj, x, y):
         plot_obj.set_xdata(x)
@@ -793,7 +794,7 @@ class ExperimentVoltageClamp:
 
 class ExperimentCurrentClamp:
     @staticmethod
-    @jit(nopython=True, fastmath=True, cache=True)
+    @jit(nopython=True, fastmath=True, cache=True, parallel=False)
     def cell(v, t, g, tau_d, g_leak, e_leak, e_syn):
         return g_leak * (e_leak - v) + g * exp(-t / tau_d) * (e_syn - v)
 
@@ -1391,7 +1392,6 @@ class Main(ScrollableFrame):
     def close_last(self, event=None):
         if messagebox.askokcancel('Close', 'Do you want to close the last experiment'):
             self.experiments[-1].destroy()
-            Experiment.rowCount -= 1
             del self.experiments[-1]
             self.update_scrollbar()
 
