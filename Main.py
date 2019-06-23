@@ -398,14 +398,15 @@ class Experiment:
         NavigationToolbar2Tk(self.canvas, self.toolbarFrame).configure(bg='white')
         self.queue = Queue()  # needed for multi-threading
 
-    def destroy(self):
+    def destroy(self, e=None):
+        if e:
+            messagebox.showerror(
+                title='Error',
+                message='Please check the file:\n%s.csv\n\nError: %s' % (self.FILE_NAME, e)
+            )
         self.experimentFrame.grid_forget()
         self.experimentFrame.destroy()
         Experiment.rowCount -= 1
-        messagebox.showerror(
-            title='Error',
-            message='Please check the file:\n%s.csv' % self.FILE_NAME
-        )
 
     def plot(self, plot_obj, x, y):
         plot_obj.set_xdata(x)
@@ -1155,8 +1156,8 @@ class Main(ScrollableFrame):
             try:
                 experiment.reload_data()
                 self.experiments.append(experiment)
-            except ValueError:
-                experiment.destroy()
+            except Exception as e:
+                experiment.destroy(e)
                 del experiment
         else:
             ok = messagebox.askokcancel(
@@ -1172,20 +1173,14 @@ class Main(ScrollableFrame):
                     try:
                         experiment.reload_data()
                         self.experiments.append(experiment)
-                    except ValueError:
-                        experiment.destroy()
+                    except Exception as e:
+                        experiment.destroy(e)
                         del experiment
                 self.update_scrollbar()
                 Experiment.delete_file_(
                     file_name, '.csv',
                     'File splitting was successful.\n'
                     'Do you want to delete %s.csv file?' % file_name)
-        # except Exception as e:
-        #     print(e)
-        #     messagebox.showerror(
-        #         title='Error',
-        #         message='Please check the file:\n%s.csv\n\n%s' % (file_name, e)
-        #     )
 
     def open(self, event=None):
         path_file_names = filedialog.askopenfilenames(
@@ -1276,7 +1271,7 @@ class Main(ScrollableFrame):
         window.grab_set()  # make the main window unclickable until closing the settings window
         Label(window, text='Current-clamp process numbers:').grid(
             row=0, column=0, sticky="W")
-        Scale(window, from_=1, to=8, variable=thread_numbers, orient='horizontal').grid(
+        Scale(window, from_=1, to=cpu_count(logical=False), variable=thread_numbers, orient='horizontal').grid(
             row=0, column=1, sticky="W")
         Label(window, text='Optimizer population size:').grid(
             row=1, column=0, sticky="W")
@@ -1395,10 +1390,9 @@ class Main(ScrollableFrame):
 
     def close_last(self, event=None):
         if messagebox.askokcancel('Close', 'Do you want to close the last experiment'):
-            self.experiments[-1].experimentFrame.grid_forget()
-            self.experiments[-1].experimentFrame.destroy()
-            del self.experiments[-1]
+            self.experiments[-1].destroy()
             Experiment.rowCount -= 1
+            del self.experiments[-1]
             self.update_scrollbar()
 
 
@@ -1407,8 +1401,8 @@ if __name__ == '__main__':
     freeze_support()
     app = Main()
     thread_numbers = IntVar()
-    thread_numbers.set((cpu_count(logical=False) - 1) if cpu_count(logical=False) == cpu_count(logical=True) else
-                       cpu_count(logical=False) + cpu_count(logical=False)/2)
+    thread_numbers.set((cpu_count(logical=False)) if cpu_count(logical=False) == cpu_count(logical=True) else
+                       cpu_count(logical=True) + cpu_count(logical=False)/2)
     population_size = IntVar()
     population_size.set(15)
     bootstrap_max_iteration = IntVar()
