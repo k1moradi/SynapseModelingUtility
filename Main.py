@@ -141,10 +141,10 @@ class Experiment:
             corrected_data = data_list.copy()
             if len(data_list) >= 2:
                 near_pick_amplitude = data_list[0][1] + (data_list[1][1] - data_list[0][1]) * 0.95
-                delta_t = (data_list[1][0] - data_list[0][0]) / 5
-                corrected_data.insert(1, [data_list[1][0] - delta_t, near_pick_amplitude])
-                corrected_data.insert(3, [data_list[1][0] + delta_t, np.interp(
-                    data_list[1][0] + delta_t,
+                corrected_data.insert(1, [data_list[1][0] - (data_list[1][0]-data_list[0][0]) / 5, near_pick_amplitude])
+                t3 = data_list[1][0] + (data_list[2][0]-data_list[1][0]) / 2
+                corrected_data.insert(3, [t3, np.interp(
+                    t3,
                     xp=[corrected_data[i][0] for i in range(4)],
                     fp=[corrected_data[i][1] for i in range(4)]
                 )])
@@ -155,8 +155,16 @@ class Experiment:
                 (t_rise, a_rise), (t_decay, a_decay) = corrected_data[3], data_list[2]
                 a_rise -= resting_membrane_potential
                 a_decay -= resting_membrane_potential
-                tau = (t_decay - t_rise) / (log(fabs(a_rise)) - log(fabs(a_decay)))
-                decay_amplitude = resting_membrane_potential + a_rise * exp(-(pseudo_decay_t - t_rise) / tau)
+                try:
+                    tau = (t_decay - t_rise) / (log(fabs(a_rise)) - log(fabs(a_decay)))
+                    decay_amplitude = resting_membrane_potential + a_rise * exp(-(pseudo_decay_t - t_rise) / tau)
+                except ZeroDivisionError:
+                    messagebox.showwarning(message='ZeroDivisionError in add_helper_points function')
+                    decay_amplitude = np.interp(
+                        pseudo_decay_t,
+                        xp=[corrected_data[i][0] for i in range(5)],
+                        fp=[corrected_data[i][1] for i in range(5)]
+                    )
                 corrected_data.insert(5, [pseudo_decay_t, decay_amplitude])
             output += corrected_data
         if len(data_sliced[-1]) < 3:
@@ -189,7 +197,7 @@ class Experiment:
 
     @staticmethod
     def plot_saved_results_(file_name, window, amplitude, ppr, isi):
-        row, width = 0, 70
+        row, width = 0, 60  # 0, 70
         font =('Courier New', 18)
         ref_id, location = findall(r'^(\d+)-?(.*)$', file_name)[0]
         json_file = Experiment.WORKING_DIRECTORY + '/' + Experiment.JSONs_FOLDER + '/' + file_name + ".json"
@@ -201,7 +209,7 @@ class Experiment:
             Experiment.summary_window.destroy()
         Experiment.summary_window = window
         window.title('Summary')
-        window.geometry('+%d+%d' % (55, 60))
+        window.geometry('+%d+%d' % (55, 60))  # 55, 60
         window.columnconfigure(1, weight=1)
         msp = StringVar(window)  # measure of spread
         msp.set(global_msp)
@@ -519,7 +527,8 @@ class Experiment:
         model = self.run_model()
         global thread_numbers, population_size, print_results_when_optimization_ends
         MultiProcessOptimization(
-            self.queue, model, self.parameters['Mode'], thread_numbers.get(), population_size.get(),
+            self.queue, model, self.parameters['Mode'], thread_numbers.get(),
+            population_size.get()*(1 if self.bootstrap_mode.get() or self.parameters['Mode'] == 'voltage-clamp' else 2),
             self.bootstrap_counter.get(), self.bootstrap_mode.get(), self.FILE_NAME,
             print_results_when_optimization_ends.get()
         ).start()
@@ -915,7 +924,7 @@ class ExperimentCurrentClamp:
             )
             corrected_data.append([t, corrected_signal[-1]])
 
-            if len(init_times) > 1 and t >= init_times[0]:
+            if len(init_times) > 1 and t >= init_times[0] and len(simulated_vs_recorded_diff_at_initiation_points) > 1:
                 init_time = init_times[0]
                 del init_times[0]
                 delta_init_t = init_times[0] - init_time
@@ -1097,7 +1106,7 @@ class Main(ScrollableFrame):
         ScrollableFrame.__init__(self, *args, **kwargs)
         # Window size and position
         self.title('Synapse Modelers Workshop')
-        self.state('zoomed')  # maximize the window
+        self.attributes('-zoomed', True) if platform.startswith("linux") else self.state('zoomed')  # maximize window
         pad = 200  # the pad size of restored window with respect to full screen
         self.geometry("{0}x{1}+{2}+{3}".format(
             self.winfo_screenwidth()-pad,   # restored window width
@@ -1150,8 +1159,8 @@ class Main(ScrollableFrame):
         return data
 
     def append_experiment(self, file_name):
-        path_ = Experiment.WORKING_DIRECTORY + '\\' + Experiment.CSVs_FOLDER + '\\'
-        file_content = open(path_ + file_name + '.csv').read()
+        csv_folder_path = path.join(Experiment.WORKING_DIRECTORY, Experiment.CSVs_FOLDER)
+        file_content = open(path.join(csv_folder_path, file_name + '.csv')).read()
         if not bool(search(r'\n{2,}', file_content)):
             experiment = Experiment(self.mainFrame, file_name)
             try:
@@ -1169,7 +1178,7 @@ class Main(ScrollableFrame):
                 for sections in filter(None, split(r'\n{2,}', file_content)):
                     col_name = findall(r'^.+?,(.+?)\n', sections)[0]
                     new_file_name = file_name + '-' + col_name
-                    open(path_ + new_file_name + '.csv', 'w').write(sections)
+                    open(path.join(csv_folder_path, new_file_name + '.csv'), 'w').write(sections)
                     experiment = Experiment(self.mainFrame, new_file_name)
                     try:
                         experiment.reload_data()
@@ -1211,7 +1220,15 @@ class Main(ScrollableFrame):
              'options': {'100-0%', '100-37%', '100-50%', '100-63%', '90-37%', 'unspecified'}},
             {'type': 'Signal', 'title': 'potency', 'unit': 'mV or pA', 'options': None},
             {'type': 'ISI', 'title': 'time', 'unit': 'ms', 'options': None},
-            {'type': 'PPR', 'title': '2/1 amplitude', 'unit': 'ratio', 'options': None}
+            {'type': 'PPR', 'title': '2/1 amplitude', 'unit': 'ratio', 'options': None},
+            # {'type': '3PPR', 'title': '3/1 amplitude', 'unit': 'ratio', 'options': None},
+            # {'type': '4PPR', 'title': '4/1 amplitude', 'unit': 'ratio', 'options': None},
+            # {'type': '5PPR', 'title': '5/1 amplitude', 'unit': 'ratio', 'options': None},
+            # {'type': '6PPR', 'title': '6/1 amplitude', 'unit': 'ratio', 'options': None},
+            # {'type': '7PPR', 'title': '7/1 amplitude', 'unit': 'ratio', 'options': None},
+            # {'type': '8PPR', 'title': '8/1 amplitude', 'unit': 'ratio', 'options': None},
+            # {'type': '9PPR', 'title': '9/1 amplitude', 'unit': 'ratio', 'options': None},
+            # {'type': '10PPR', 'title': '10/1 amplitude', 'unit': 'ratio', 'options': None}
         ]
         for row, value in enumerate(row_values):
             entries[value['type']] = EntryWithPlaceholder(
@@ -1272,7 +1289,7 @@ class Main(ScrollableFrame):
         window.grab_set()  # make the main window unclickable until closing the settings window
         Label(window, text='Current-clamp process numbers:').grid(
             row=0, column=0, sticky="W")
-        Scale(window, from_=1, to=cpu_count(logical=False), variable=thread_numbers, orient='horizontal').grid(
+        Scale(window, from_=1, to=cpu_count(), variable=thread_numbers, orient='horizontal').grid(
             row=0, column=1, sticky="W")
         Label(window, text='Optimizer population size:').grid(
             row=1, column=0, sticky="W")
@@ -1401,8 +1418,7 @@ if __name__ == '__main__':
     freeze_support()
     app = Main()
     thread_numbers = IntVar()
-    thread_numbers.set((cpu_count(logical=False)) if cpu_count(logical=False) == cpu_count(logical=True) else
-                       cpu_count(logical=True) + cpu_count(logical=False)/2)
+    thread_numbers.set(cpu_count(logical=True) - (0 if cpu_count(logical=False) == cpu_count(logical=True) else 2))
     population_size = IntVar()
     population_size.set(15)
     bootstrap_max_iteration = IntVar()
