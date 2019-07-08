@@ -51,7 +51,7 @@ class Experiment:
     MAY_NEED_OPTIMIZATION = ['Cm', 'Rin']
     WORKING_DIRECTORY = '.'
     DECIMAL_POINTS = 3
-    default_mode = 'voltage-clamp'
+    default_mode = 'current-clamp'  # 'voltage-clamp'
     summary_window = None
 
     @staticmethod
@@ -131,44 +131,50 @@ class Experiment:
 
     @staticmethod
     def add_helper_points(data_frame):
+        def chunks(l, n):  # Yield successive n-sized chunks from l.
+            for i in range(0, len(l), n):
+                yield l[i:i + n + 1]
         data = data_frame.values.tolist()
         resting_membrane_potential = data[0][1]
-        data_sliced = list(Main.chunks(data, 3))
+        data_sliced = list(chunks(data, 3))
         output = []
-        for idx, data_list in enumerate(data_sliced):
-            if idx == len(data_sliced)-1:
-                continue
+        for data_list in data_sliced:
             corrected_data = data_list.copy()
-            if len(data_list) >= 2:
+            if len(data_list) > 1:
                 near_pick_amplitude = data_list[0][1] + (data_list[1][1] - data_list[0][1]) * 0.95
-                corrected_data.insert(1, [data_list[1][0] - (data_list[1][0]-data_list[0][0]) / 5, near_pick_amplitude])
-                t3 = data_list[1][0] + (data_list[2][0]-data_list[1][0]) / 2
+                corrected_data.insert(1, [data_list[1][0] - (data_list[1][0] - data_list[0][0])/5, near_pick_amplitude])
+            if len(data_list) > 2:
+                t3 = data_list[1][0] + (data_list[2][0] - data_list[1][0]) / 2
                 corrected_data.insert(3, [t3, np.interp(
                     t3,
-                    xp=[corrected_data[i][0] for i in range(4)],
-                    fp=[corrected_data[i][1] for i in range(4)]
+                    xp=[corrected_data[i][0] for i in range(len(corrected_data))],
+                    fp=[corrected_data[i][1] for i in range(len(corrected_data))]
                 )])
-                pseudo_decay_t, i = data_list[2][0] + (data_list[2][0] - data_list[1][0]) / 2, 2
-                while pseudo_decay_t > data_sliced[idx+1][0][0]:
-                    i += 1
-                    pseudo_decay_t = data_list[2][0] + (data_list[2][0] - data_list[1][0]) / i
+                pseudo_decay_t = data_list[2][0] + (data_list[2][0] - data_list[1][0]) / 2
+                if len(data_list) > 3:
+                    i = 2
+                    while pseudo_decay_t > data_list[3][0]:
+                        i += 1
+                        pseudo_decay_t = data_list[2][0] + (data_list[2][0] - data_list[1][0]) / i
                 (t_rise, a_rise), (t_decay, a_decay) = corrected_data[3], data_list[2]
                 a_rise -= resting_membrane_potential
                 a_decay -= resting_membrane_potential
+                decay_amplitude = np.interp(
+                    pseudo_decay_t,
+                    xp=[corrected_data[i][0] for i in range(len(corrected_data))],
+                    fp=[corrected_data[i][1] for i in range(len(corrected_data))]
+                )
                 try:
                     tau = (t_decay - t_rise) / (log(fabs(a_rise)) - log(fabs(a_decay)))
-                    decay_amplitude = resting_membrane_potential + a_rise * exp(-(pseudo_decay_t - t_rise) / tau)
+                    decay_amplitude += resting_membrane_potential + a_rise * exp(-(pseudo_decay_t - t_rise) / tau)
+                    decay_amplitude /= 2
                 except ZeroDivisionError:
                     messagebox.showwarning(message='ZeroDivisionError in add_helper_points function')
-                    decay_amplitude = np.interp(
-                        pseudo_decay_t,
-                        xp=[corrected_data[i][0] for i in range(5)],
-                        fp=[corrected_data[i][1] for i in range(5)]
-                    )
+                    pass
                 corrected_data.insert(5, [pseudo_decay_t, decay_amplitude])
+                if len(data_list) > 3:
+                    del corrected_data[-1]
             output += corrected_data
-        if len(data_sliced[-1]) < 3:
-            output += data_sliced[-1]
         return DataFrame(output, columns=['time', 'signal'])
 
     @staticmethod
@@ -1217,7 +1223,7 @@ class Main(ScrollableFrame):
             {'type': 'Rise', 'title': 'time', 'unit': 'ms',
              'options': {'10-90%', '0-100%', '20-80%', 'time constant', 'unspecified'}},
             {'type': 'Decay', 'title': 'time', 'unit': 'ms',
-             'options': {'100-0%', '100-37%', '100-50%', '100-63%', '90-37%', 'unspecified'}},
+             'options': {'100-0%', '100-37%', '100-50%', '100-63%', '90-37%', 'time constant', 'unspecified'}},
             {'type': 'Signal', 'title': 'potency', 'unit': 'mV or pA', 'options': None},
             {'type': 'ISI', 'title': 'time', 'unit': 'ms', 'options': None},
             {'type': 'PPR', 'title': '2/1 amplitude', 'unit': 'ratio', 'options': None},
@@ -1258,7 +1264,8 @@ class Main(ScrollableFrame):
                 a_rise = float(entries['Signal'].get_())
                 df.loc[1] = [t_rise, a_rise]
                 decay_conversion_factor = {
-                    '100-0%': 0.0, '100-37%': 0.37, '100-50%': 0.5, '100-63%': 0.63, '90-37%': 0.37, 'unspecified': 0.0}
+                    '100-0%': 0.0, '100-37%': 0.37, '100-50%': 0.5, '100-63%': 0.63, '90-37%': 0.37,
+                    'time constant': 0.37, 'unspecified': 0.0}
                 t_decay = t_rise + float(entries['Decay'].get_()) * (
                     1 if types['Decay'].get() != '90-37%' else 0.63 / 0.57)
                 a_decay = a_rise * decay_conversion_factor.get(types['Decay'].get())
@@ -1276,7 +1283,7 @@ class Main(ScrollableFrame):
             f = filedialog.asksaveasfile(defaultextension=".csv")
             if f is None:  # asksaveasfile return `None` if dialog closed with "cancel".
                 return
-            all_dfs.to_csv(f, index=False)
+            all_dfs.to_csv(f, index=False, line_terminator='\n')  #
             # window.destroy()
         make_save_pseudo_trace.window = window
         make_save_pseudo_trace.entries = entries
