@@ -19,6 +19,7 @@ from my_scatter_matrix import scatter_matrix
 from math import exp, fabs, isnan, log
 from scipy.integrate import odeint
 from scipy.optimize import differential_evolution
+from scipy.interpolate import PchipInterpolator  # The cubic Hermite interpolation mmas.github.io/interpolation-scipy
 from re import match, findall, split, search
 from time import time, sleep
 from numba import jit
@@ -93,7 +94,7 @@ class Experiment:
         parameters['tau_r_max'] = 30000.0
         parameters['U_max'] = 1 - 10**-Experiment.DECIMAL_POINTS
 
-        json_file = Experiment.WORKING_DIRECTORY + '/' + Experiment.JSONs_FOLDER + '/' + file_name + '.json'
+        json_file = path.join(Experiment.WORKING_DIRECTORY, Experiment.JSONs_FOLDER, file_name + '.json')
         if path.isfile(json_file):
             loaded_parameters = Experiment.get_json_file_as_dict_list(json_file)[0]
             for key in parameters:
@@ -135,47 +136,38 @@ class Experiment:
             for i in range(0, len(l), n):
                 yield l[i:i + n + 1]
         data = data_frame.values.tolist()
-        resting_membrane_potential = data[0][1]
         data_sliced = list(chunks(data, 3))
-        output = []
+        output, weight = [], []
         for data_list in data_sliced:
             corrected_data = data_list.copy()
+            error_weight__ = [1.0] * len(data_list)
+            interpolated_weight = 0.5  # should be less than one
+            t = [data_list[i][0] for i in range(len(data_list))]
+            y = [data_list[i][1] for i in range(len(data_list))]
             if len(data_list) > 1:
-                near_pick_amplitude = data_list[0][1] + (data_list[1][1] - data_list[0][1]) * 0.95
-                corrected_data.insert(1, [data_list[1][0] - (data_list[1][0] - data_list[0][0])/5, near_pick_amplitude])
+                t1 = (data_list[1][0] + data_list[0][0]) / 2
+                interpolator = PchipInterpolator(t, y)
+                corrected_data.insert(1, [t1, interpolator(t1)])
+                error_weight__.insert(1, interpolated_weight)
             if len(data_list) > 2:
-                t3 = data_list[1][0] + (data_list[2][0] - data_list[1][0]) / 2
-                corrected_data.insert(3, [t3, np.interp(
-                    t3,
-                    xp=[corrected_data[i][0] for i in range(len(corrected_data))],
-                    fp=[corrected_data[i][1] for i in range(len(corrected_data))]
-                )])
-                pseudo_decay_t = data_list[2][0] + (data_list[2][0] - data_list[1][0]) / 2
-                if len(data_list) > 3:
-                    i = 2
-                    while pseudo_decay_t > data_list[3][0]:
-                        i += 1
-                        pseudo_decay_t = data_list[2][0] + (data_list[2][0] - data_list[1][0]) / i
-                (t_rise, a_rise), (t_decay, a_decay) = corrected_data[3], data_list[2]
-                a_rise -= resting_membrane_potential
-                a_decay -= resting_membrane_potential
-                decay_amplitude = np.interp(
-                    pseudo_decay_t,
-                    xp=[corrected_data[i][0] for i in range(len(corrected_data))],
-                    fp=[corrected_data[i][1] for i in range(len(corrected_data))]
-                )
-                try:
-                    tau = (t_decay - t_rise) / (log(fabs(a_rise)) - log(fabs(a_decay)))
-                    decay_amplitude += resting_membrane_potential + a_rise * exp(-(pseudo_decay_t - t_rise) / tau)
-                    decay_amplitude /= 2
-                except ZeroDivisionError:
-                    messagebox.showwarning(message='ZeroDivisionError in add_helper_points function')
-                    pass
-                corrected_data.insert(5, [pseudo_decay_t, decay_amplitude])
-                if len(data_list) > 3:
-                    del corrected_data[-1]
+                t3 = (data_list[2][0] + 7.0 * data_list[1][0]) / 8.0
+                corrected_data.insert(3, [t3, interpolator(t3)])
+                error_weight__.insert(3, interpolated_weight)
+                t4 = (data_list[2][0] + 3.0 * data_list[1][0]) / 4.0
+                corrected_data.insert(4, [t4, interpolator(t4)])
+                error_weight__.insert(4, interpolated_weight)
+                t5 = (data_list[2][0] + data_list[1][0]) / 2
+                corrected_data.insert(5, [t5, interpolator(t5)])
+                error_weight__.insert(5, interpolated_weight)
+            if len(data_list) > 3:
+                t7 = (data_list[3][0] + data_list[2][0]) / 2.0
+                corrected_data.insert(7, [t7, interpolator(t7)] if (data_list[3][0] - data_list[2][0]) < 100 else
+                                         [data_list[2][0]+100, data_list[3][1]])
+                error_weight__.insert(7, interpolated_weight)
+                del corrected_data[-1], error_weight__[-1]
             output += corrected_data
-        return DataFrame(output, columns=['time', 'signal'])
+            weight += error_weight__
+        return DataFrame(output, columns=['time', 'signal']), weight
 
     @staticmethod
     def initiation_points(mode, time_list, signal_list):
@@ -412,6 +404,7 @@ class Experiment:
         self.toolbar = NavigationToolbar2Tk(self.canvas, self.toolbarFrame)
         self.toolbar.configure(bg='white')
         self.queue = Queue()  # needed for multi-threading
+        self.current_clamp_error_weights = None
 
     def destroy(self, e=None):
         if e:
@@ -445,7 +438,7 @@ class Experiment:
         data = Experiment.correct_digitization(data, self.parameters['Mode'], self.parameters['Vm'])
         [t, y] = Experiment.initiation_points(self.parameters['Mode'], data.time, data.signal)
         if self.parameters['Mode'] == 'current-clamp':
-            data = Experiment.add_helper_points(data)
+            data, self.current_clamp_error_weights = Experiment.add_helper_points(data)
         # since the data stored in the plots are accessible we do not need to store them somewhere else
         self.plot(self.plotCorrectedSignal, [], [])
         self.plot(self.plotInitTimes, t, y)
@@ -502,7 +495,7 @@ class Experiment:
                 self.get_ty_data(), self.get_init_times(), self.parameters['Erev'], self.parameters['Vm'], bounds)
         elif self.parameters['Mode'] == "current-clamp":
             input_tuple = (
-                self.get_ty_data(), self.get_init_times(), self.parameters['Erev'],
+                self.get_ty_data(), self.current_clamp_error_weights, self.get_init_times(), self.parameters['Erev'],
                 self.parameters['Vm'], self.parameters['Rin'], self.parameters['Cm'])
             model = ExperimentCurrentClamp(*(input_tuple + (bounds,)))
             if self.parameterMayNeedOptimization['Cm'].get() and self.parameterMayNeedOptimization['Rin'].get():
@@ -579,7 +572,7 @@ class Experiment:
             fake_high_res_t_data = sorted([float(x) for x in range(int(self.get_t_data()[-1]))] + self.get_t_data())
             fake_high_res_data = [[t, 0] for t in fake_high_res_t_data]
             model = self.run_model()  # model should run after setting the entries
-            model.set_data(fake_high_res_data)
+            model.set_data(fake_high_res_data, [1.0]*len(fake_high_res_data))
             model.simulate(results.x)
             self.plot(self.plotModel, [row[0] for row in fake_high_res_data], model.simulatedSignal)
             self.bootstrap_counter.set(0)
@@ -625,13 +618,15 @@ class Experiment:
 
     def plot_saved_results(self):
         data = self.get_ty_data()
-        peak_idx, second_event_start_index = (2, 6) if self.parameters['Mode'] == 'current-clamp' else (1, 3)
+        init_times = self.get_init_times()
+        peak_idx, second_event_start_index = (2, 8) if self.parameters['Mode'] == 'current-clamp' else (1, 3)
         (t0, y0), (t_peak, y_peak) = data[0], data[peak_idx]
         amplitude, ppr,  isi = y_peak-y0, None, None
-        if len(data) > (second_event_start_index + peak_idx) and amplitude != 0.0:
+        if len(data) > (second_event_start_index + peak_idx) and amplitude != 0.0 and len(init_times) > 1:
             second_t0, second_y0 = data[second_event_start_index]
             second_t_peak, second_y_peak = data[second_event_start_index+peak_idx]
-            ppr, isi = abs((second_y_peak - second_y0) / amplitude), second_t_peak - t_peak
+            ppr = abs((second_y_peak - second_y0) / amplitude)
+            isi = init_times[1] - init_times[0]
         Experiment.plot_saved_results_(self.FILE_NAME, Toplevel(self.experimentFrame), amplitude, ppr, isi)
 
 
@@ -710,7 +705,7 @@ class ExperimentVoltageClamp:
         self.set_data(data_list)
         self.drivingForce = float(holding_potential) - float(synaptic_reversal_potential)  # in mV
 
-    def set_data(self, data_list):
+    def set_data(self, data_list, weights=None):
         self.dataList = data_list.copy()  # format [[t in ms, i in pA],]
         amp = fabs(data_list[0][1] - data_list[1][1])
         self.normalization_value = (amp if amp != 0.0 else 1.0) * (self.num_events if self.num_events != 0 else 1.0)
@@ -799,7 +794,6 @@ class ExperimentVoltageClamp:
                 delta_init_signal = simulated_vs_recorded_diff_at_initiation_points[0]
                 del simulated_vs_recorded_diff_at_initiation_points[0]
                 delta_init_signal_next = simulated_vs_recorded_diff_at_initiation_points[0]
-
         if len(corrected_signal) == len(self.dataList):
             self.set_data(corrected_data)
         else:
@@ -818,7 +812,7 @@ class ExperimentCurrentClamp:
     def sum_soft_l1_loss(data_signal, model_signal, error_weight):  # smoothed least square function
         return np.nansum((2.0 * ((1.0 + (data_signal - model_signal) ** 2.0) ** 0.5) - 1.0) * error_weight)
 
-    def __init__(self, data_list, init_times, synaptic_reversal_potential, membrane_potential,
+    def __init__(self, data_list, weights, init_times, synaptic_reversal_potential, membrane_potential,
                  input_resistance, membrane_capacitance, bounds):
         self.BOUNDS = bounds
         self.initTimes = init_times  # [synTimes in ms]
@@ -832,14 +826,16 @@ class ExperimentCurrentClamp:
         self.V0 = self.leakReversalPotential = float(membrane_potential)  # in mV
         self.simulatedSignal, self.delta_ts_list, self.delta_ts_last, self.simulatedSignalHead = [], None, None, None
         self.g0, self.tau_d, self.tau_d, self.tau_f, self.tau_r, self.U = None, None, None, None, None, None
-        self.set_data(data_list)
+        self.errorWeights = None
+        self.set_data(data_list, weights)
 
-    def set_data(self, data_list):
+    def set_data(self, data_list, weights=None):
         amp = data_list[1][1] - data_list[0][1]  # calculate peak
         self.normalization_value = (fabs(amp) if amp != 0.0 else 1.0)*(self.num_events if self.num_events != 0 else 1.0)
         self.dataList = data_list.copy()  # format [[t in ms, membrane potential in pA], ]
         self.dataSignal = np.array([data_list[i][1] for i in range(len(data_list))], dtype='float')
-        self.errorWeights = np.array([(idx % 2 + 1) / 2 for idx in range(1, len(data_list)+1)], dtype='float')
+        if weights:
+            self.errorWeights = np.asarray(weights, dtype='float')
         self.delta_ts_list, self.simulatedSignalHead = [], np.array([self.V0], dtype='float')
         init_times, data = self.initTimes.copy(), data_list.copy()
         init_time, delta_ts = init_times[0], []
@@ -945,10 +941,10 @@ class ExperimentCurrentClamp:
 
 
 class ExperimentCurrentClampCapacitance(ExperimentCurrentClamp):
-    def __init__(self, data_list, init_times, synaptic_reversal_potential, membrane_potential,
+    def __init__(self, data_list, weights, init_times, synaptic_reversal_potential, membrane_potential,
                  input_resistance, membrane_capacitance, bounds):
-        ExperimentCurrentClamp.__init__(self, data_list, init_times, synaptic_reversal_potential, membrane_potential,
-                                        input_resistance, membrane_capacitance, bounds)
+        ExperimentCurrentClamp.__init__(self, data_list, weights, init_times, synaptic_reversal_potential,
+                                        membrane_potential, input_resistance, membrane_capacitance, bounds)
         self.BOUNDS = bounds
 
     def input_parser(self, input_vec):
@@ -962,10 +958,10 @@ class ExperimentCurrentClampCapacitance(ExperimentCurrentClamp):
 
 
 class ExperimentCurrentClampResistance(ExperimentCurrentClamp):
-    def __init__(self, data_list, init_times, synaptic_reversal_potential, membrane_potential,
+    def __init__(self, data_list, weights, init_times, synaptic_reversal_potential, membrane_potential,
                  input_resistance, membrane_capacitance, bounds):
-        ExperimentCurrentClamp.__init__(self, data_list, init_times, synaptic_reversal_potential, membrane_potential,
-                                        input_resistance, membrane_capacitance, bounds)
+        ExperimentCurrentClamp.__init__(self, data_list, weights, init_times, synaptic_reversal_potential,
+                                        membrane_potential, input_resistance, membrane_capacitance, bounds)
         self.BOUNDS = bounds
         self.inputResistance = float(input_resistance)
 
@@ -980,10 +976,10 @@ class ExperimentCurrentClampResistance(ExperimentCurrentClamp):
 
 
 class ExperimentCurrentClampRinCm(ExperimentCurrentClamp):
-    def __init__(self, data_list, init_times, synaptic_reversal_potential, membrane_potential,
+    def __init__(self, data_list, weights, init_times, synaptic_reversal_potential, membrane_potential,
                  input_resistance, membrane_capacitance, bounds):
-        ExperimentCurrentClamp.__init__(self, data_list, init_times, synaptic_reversal_potential, membrane_potential,
-                                        input_resistance, membrane_capacitance, bounds)
+        ExperimentCurrentClamp.__init__(self, data_list, weights, init_times, synaptic_reversal_potential,
+                                        membrane_potential, input_resistance, membrane_capacitance, bounds)
         self.BOUNDS = bounds
         self.inputResistance = float(input_resistance)
 
@@ -1082,12 +1078,13 @@ class EntryWithPlaceholder(Entry):
         except TclError:
             pass
 
-    def set(self, txt):
+    def set(self, txt_or_value):
         state = self['state']
         self['state'] = 'normal'
         self.delete('0', 'end')
-        self.insert(0, txt)
-        self['fg'] = self.default_fg_color
+        isnone = txt_or_value or txt_or_value == 0
+        self.insert(0, txt_or_value if isnone else self.placeholder)
+        self['fg'] = self.default_fg_color if isnone else self.placeholder_color
         self['state'] = state
 
     def get_(self):
@@ -1222,12 +1219,12 @@ class Main(ScrollableFrame):
         row_values = [
             {'type': 'Rise', 'title': 'time', 'unit': 'ms',
              'options': {'10-90%', '0-100%', '20-80%', 'time constant', 'unspecified'}},
-            {'type': 'Decay', 'title': 'time', 'unit': 'ms',
-             'options': {'100-0%', '100-37%', '100-50%', '100-63%', '90-37%', 'time constant', 'unspecified'}},
+            {'type': 'Decay', 'title': 'time', 'unit': 'ms', 'options':
+                {'100-0%', '100-37%', '100-50%', '100-63%', '90-37%', 'time constant', '50-50%', 'unspecified'}},
             {'type': 'Signal', 'title': 'potency', 'unit': 'mV or pA', 'options': None},
             {'type': 'ISI', 'title': 'time', 'unit': 'ms', 'options': None},
             {'type': 'PPR', 'title': '2/1 amplitude', 'unit': 'ratio', 'options': None},
-            # {'type': '3PPR', 'title': '3/1 amplitude', 'unit': 'ratio', 'options': None},
+            {'type': '3PPR', 'title': '3/1 amplitude', 'unit': 'ratio', 'options': None},
             # {'type': '4PPR', 'title': '4/1 amplitude', 'unit': 'ratio', 'options': None},
             # {'type': '5PPR', 'title': '5/1 amplitude', 'unit': 'ratio', 'options': None},
             # {'type': '6PPR', 'title': '6/1 amplitude', 'unit': 'ratio', 'options': None},
@@ -1264,31 +1261,66 @@ class Main(ScrollableFrame):
                 a_rise = float(entries['Signal'].get_())
                 df.loc[1] = [t_rise, a_rise]
                 decay_conversion_factor = {
-                    '100-0%': 0.0, '100-37%': 0.37, '100-50%': 0.5, '100-63%': 0.63, '90-37%': 0.37,
+                    '100-0%': 0.0, '100-37%': 0.37, '100-50%': 0.5, '50-50%': 0.5, '100-63%': 0.63, '90-37%': 0.37,
                     'time constant': 0.37, 'unspecified': 0.0}
-                t_decay = t_rise + float(entries['Decay'].get_()) * (
-                    1 if types['Decay'].get() != '90-37%' else 0.63 / 0.57)
+                t_decay = (t_rise if types['Decay'].get() != '50-50%' else t_rise/2
+                           ) + float(entries['Decay'].get_()) * (1 if types['Decay'].get() != '90-37%' else 0.63 / 0.57)
                 a_decay = a_rise * decay_conversion_factor.get(types['Decay'].get())
                 df.loc[2] = [t_decay, a_decay]
+                tau = (t_decay - t_rise) / (log(fabs(a_rise)) - log(fabs(a_decay)))
+                df.loc[3] = [2.0 * t_decay - t_rise, a_rise * exp(-2.0*(t_decay - t_rise) / tau)]
                 if entries['ISI'].get_() and entries['PPR'].get_():
                     tau = (t_decay - t_rise) / (log(fabs(a_rise)) - log(fabs(a_decay)))
                     df.loc[2] = [(isi + t_rise)/2, a_rise * exp(-(isi - t_rise) / 2 / tau)]
                     df.loc[3] = [isi, a_rise * exp(-(isi-t_rise)/tau)]
                     df.loc[4] = [isi + t_rise, df.loc[3].signal + a_rise * ppr]
-                    df.loc[5] = [isi + t_decay, df.loc[4].signal * exp(-(t_decay - t_rise) / tau)]
+                    second_t_decay = (df.loc[4].time + 2.0 * isi) / 2
+                    df.loc[5] = [second_t_decay, df.loc[4].signal * exp(-(second_t_decay - df.loc[4].time) / tau)]
+                    df.loc[6] = [2.0 * isi, df.loc[4].signal * exp(-(isi - t_rise) / tau)]
+                if entries['ISI'].get_() and entries['3PPR'].get_():
+                    df.loc[7] = [2.0 * isi + t_rise, df.loc[6].signal + a_rise * float(entries['3PPR'].get_())]
+                    third_t_decay = (df.loc[7].time + 3.0 * isi)/2
+                    df.loc[8] = [third_t_decay, df.loc[7].signal * exp(-(third_t_decay - df.loc[7].time) / tau)]
+                    df.loc[9] = [3.0 * isi, df.loc[7].signal * exp(-(isi - t_rise) / tau)]
                 df.time = df.time + 60000 * idx
-                print(df)
+                if idx > 0:
+                    all_dfs = all_dfs[:-1]
                 all_dfs = all_dfs.append(df)
-
             f = filedialog.asksaveasfile(defaultextension=".csv")
             if f is None:  # asksaveasfile return `None` if dialog closed with "cancel".
                 return
             all_dfs.to_csv(f, index=False, line_terminator='\n')  #
-            # window.destroy()
-        make_save_pseudo_trace.window = window
-        make_save_pseudo_trace.entries = entries
-        make_save_pseudo_trace.types = types
 
+        def clear_fields():
+            for value_ in row_values:
+                entries[value_['type']].put_placeholder()
+
+        def get_data_from_csv():
+            f = filedialog.askopenfilename(defaultextension=".csv")
+            if f:
+                df = read_csv(f)
+                df = df.rename(columns={
+                    df.columns[0]: "time",
+                    df.columns[1]: "signal"})
+                if len(df) > 1:
+                    t_rise, a_rise = df.loc[1].time - df.loc[0].time, df.loc[1].signal - df.loc[0].signal
+                    entries['Signal'].set(a_rise)
+                    entries['Rise'].set(t_rise)
+                if len(df) > 2:
+                    t_decay, a_decay = df.loc[2].time - df.loc[0].time, df.loc[2].signal - df.loc[0].signal
+                    types['Rise'].set('0-100%')
+                    tau = (t_decay - t_rise) / (log(fabs(a_rise)) - log(fabs(a_decay)))
+                    entries['Decay'].set(tau)
+                    types['Decay'].set('time constant')
+                if len(df) > 4:
+                    entries['ISI'].set(df.loc[3].time - df.loc[0].time)
+                    entries['PPR'].set((df.loc[4].signal - df.loc[3].signal) / a_rise)
+                if len(df) > 7:
+                    entries['3PPR'].set((df.loc[7].signal - df.loc[6].signal) / a_rise)
+            window.lift()
+
+        Button(window, command=get_data_from_csv, text='Read CSV').grid(row=row - 2, column=1, sticky='NEWS')
+        Button(window, command=clear_fields, text='Clear').grid(row=row-1, column=1, sticky='NEWS')
         Button(window, command=make_save_pseudo_trace, text='Save CSV').grid(row=row, column=1, sticky='NEWS')
 
     def options(self):
