@@ -4,6 +4,7 @@ Created on Mon Mar 18 16:59:35 2019
 
 @author: Keivan Moradi
 """
+# pyinstaller --onefile .\OptimizerApp.py
 from psutil import cpu_count
 from sys import platform, setrecursionlimit
 from os import listdir, path, getcwd, environ, remove, system
@@ -142,14 +143,14 @@ class Experiment:
             corrected_data = data_list.copy()
             error_weight__ = [1.0] * len(data_list)
             interpolated_weight = 0.5  # should be less than one
-            t = [data_list[i][0] for i in range(len(data_list))]
-            y = [data_list[i][1] for i in range(len(data_list))]
-            if len(data_list) > 1:
+            t = [data_list[i][0] for i in range(len(data_list)) if str(data_list[i][1]) != 'nan']
+            y = [data_list[i][1] for i in range(len(data_list)) if str(data_list[i][1]) != 'nan']
+            if len(data_list) > 1 and len(y) > 1:
                 t1 = (data_list[1][0] + data_list[0][0]) / 2
                 interpolator = PchipInterpolator(t, y)
                 corrected_data.insert(1, [t1, interpolator(t1)])
                 error_weight__.insert(1, interpolated_weight)
-            if len(data_list) > 2:
+            if len(data_list) > 2 and len(y) > 1:
                 t3 = (data_list[2][0] + 7.0 * data_list[1][0]) / 8.0
                 corrected_data.insert(3, [t3, interpolator(t3)])
                 error_weight__.insert(3, interpolated_weight)
@@ -159,7 +160,7 @@ class Experiment:
                 t5 = (data_list[2][0] + data_list[1][0]) / 2
                 corrected_data.insert(5, [t5, interpolator(t5)])
                 error_weight__.insert(5, interpolated_weight)
-            if len(data_list) > 3:
+            if len(data_list) > 3 and len(y) > 1:
                 t7 = (data_list[3][0] + data_list[2][0]) / 2.0
                 corrected_data.insert(7, [t7, interpolator(t7)] if (data_list[3][0] - data_list[2][0]) < 100 else
                                          [data_list[2][0]+100, data_list[3][1]])
@@ -1225,14 +1226,15 @@ class Main(ScrollableFrame):
             {'type': 'ISI', 'title': 'time', 'unit': 'ms', 'options': None},
             {'type': 'PPR', 'title': '2/1 amplitude', 'unit': 'ratio', 'options': None},
             {'type': '3PPR', 'title': '3/1 amplitude', 'unit': 'ratio', 'options': None},
-            # {'type': '4PPR', 'title': '4/1 amplitude', 'unit': 'ratio', 'options': None},
-            # {'type': '5PPR', 'title': '5/1 amplitude', 'unit': 'ratio', 'options': None},
-            # {'type': '6PPR', 'title': '6/1 amplitude', 'unit': 'ratio', 'options': None},
-            # {'type': '7PPR', 'title': '7/1 amplitude', 'unit': 'ratio', 'options': None},
-            # {'type': '8PPR', 'title': '8/1 amplitude', 'unit': 'ratio', 'options': None},
-            # {'type': '9PPR', 'title': '9/1 amplitude', 'unit': 'ratio', 'options': None},
-            # {'type': '10PPR', 'title': '10/1 amplitude', 'unit': 'ratio', 'options': None}
+            {'type': '4PPR', 'title': '4/1 amplitude', 'unit': 'ratio', 'options': None},
+            {'type': '5PPR', 'title': '5/1 amplitude', 'unit': 'ratio', 'options': None},
+            {'type': '6PPR', 'title': '6/1 amplitude', 'unit': 'ratio', 'options': None},
+            {'type': '7PPR', 'title': '7/1 amplitude', 'unit': 'ratio', 'options': None},
+            {'type': '8PPR', 'title': '8/1 amplitude', 'unit': 'ratio', 'options': None},
+            {'type': '9PPR', 'title': '9/1 amplitude', 'unit': 'ratio', 'options': None},
+            {'type': '10PPR', 'title': '10/1 amplitude', 'unit': 'ratio', 'options': None}
         ]
+        ppr_indices = ['PPR', '3PPR', '4PPR', '5PPR', '6PPR', '7PPR', '8PPR', '9PPR', '10PPR']
         for row, value in enumerate(row_values):
             entries[value['type']] = EntryWithPlaceholder(
                 master=window,
@@ -1247,16 +1249,13 @@ class Main(ScrollableFrame):
                 OptionMenu(window, types[value['type']], *value['options']).grid(row=row, column=1, sticky='NEWS')
 
         def make_save_pseudo_trace():
-            inter_stimulus_intervals, paired_pulse_ratios = [None], [None]
             all_dfs = DataFrame({'time': [], 'signal': []})
-            if entries['ISI'].get_() and entries['PPR'].get_():
-                inter_stimulus_intervals = map(float, split(r'\s*[,; ]+\s*', entries['ISI'].get_()))
-                paired_pulse_ratios = map(float, split(r'\s*[,; ]+\s*', entries['PPR'].get_()))
-            for idx, (isi, ppr) in enumerate(zip(inter_stimulus_intervals, paired_pulse_ratios), start=0):
+            isi_str = entries['ISI'].get_()
+            inter_stimulus_intervals = map(float, split(r'\s*[,;]\s*', isi_str)) if isi_str else [None]
+            for idx, isi in enumerate(inter_stimulus_intervals, start=0):
                 df = DataFrame({'time': [0], 'signal': [0]})
-                t_rise, a_rise, t_decay, a_decay = None, None, None, None
                 rise_conversion_factor = {
-                    '10-90%': 0.8, '0-100%': 1.0, '20-80%': 0.6, 'time constant': 0.632, 'unspecified': 0.6}
+                    '10-90%': 0.8, '0-100%': 1.0, '20-80%': 0.6, 'time constant': 0.632, 'unspecified': 1.0}
                 t_rise = float(entries['Rise'].get_()) / rise_conversion_factor.get(types['Rise'].get())
                 a_rise = float(entries['Signal'].get_())
                 df.loc[1] = [t_rise, a_rise]
@@ -1269,19 +1268,57 @@ class Main(ScrollableFrame):
                 df.loc[2] = [t_decay, a_decay]
                 tau = (t_decay - t_rise) / (log(fabs(a_rise)) - log(fabs(a_decay)))
                 df.loc[3] = [2.0 * t_decay - t_rise, a_rise * exp(-2.0*(t_decay - t_rise) / tau)]
-                if entries['ISI'].get_() and entries['PPR'].get_():
-                    tau = (t_decay - t_rise) / (log(fabs(a_rise)) - log(fabs(a_decay)))
-                    df.loc[2] = [(isi + t_rise)/2, a_rise * exp(-(isi - t_rise) / 2 / tau)]
-                    df.loc[3] = [isi, a_rise * exp(-(isi-t_rise)/tau)]
-                    df.loc[4] = [isi + t_rise, df.loc[3].signal + a_rise * ppr]
-                    second_t_decay = (df.loc[4].time + 2.0 * isi) / 2
-                    df.loc[5] = [second_t_decay, df.loc[4].signal * exp(-(second_t_decay - df.loc[4].time) / tau)]
-                    df.loc[6] = [2.0 * isi, df.loc[4].signal * exp(-(isi - t_rise) / tau)]
-                if entries['ISI'].get_() and entries['3PPR'].get_():
-                    df.loc[7] = [2.0 * isi + t_rise, df.loc[6].signal + a_rise * float(entries['3PPR'].get_())]
-                    third_t_decay = (df.loc[7].time + 3.0 * isi)/2
-                    df.loc[8] = [third_t_decay, df.loc[7].signal * exp(-(third_t_decay - df.loc[7].time) / tau)]
-                    df.loc[9] = [3.0 * isi, df.loc[7].signal * exp(-(isi - t_rise) / tau)]
+
+                if isi:
+                    j = 1.0
+                    while t_decay >= isi or t_decay >= tau:
+                        j += 1.0
+                        t_decay = t_rise + (isi - t_rise) / j
+                        df.loc[2] = [t_decay, a_rise * exp(-(t_decay - t_rise) / tau)]
+                    df.loc[3] = [isi, a_rise * exp(-(isi - t_rise) / tau)]
+                    ppr_ts, ppr_as = [0.0], [1.0]
+                    for i, ppr_index in enumerate(ppr_indices, start=1):
+                        paired_pulse_ratios = split(r'\s*[,;]\s*', entries[ppr_index].get_())
+                        if idx < len(paired_pulse_ratios):
+                            try:
+                                ppr_as += [float(paired_pulse_ratios[idx])]
+                                ppr_ts += [float(i * isi)]
+                            except ValueError or TypeError:
+                                pass
+                    if len(ppr_as) > 2:
+                        interpolator = PchipInterpolator(ppr_ts, ppr_as, extrapolate=True)
+                        print('using cubic Hermite interpolator for PPRs')
+                    elif len(ppr_as) == 2 and ppr_as[1] < 1:
+                        def interpolator(t):
+                            ppr_tau = (ppr_ts[1] - ppr_ts[0]) / (log(fabs(ppr_as[0])) - log(fabs(ppr_as[1])))
+                            return ppr_as[0] * exp(-(t - ppr_ts[0]) / ppr_tau)
+                        print('using single exponential interpolator for PPRs')
+                    else:
+                        interpolator = None
+
+                    for i, ppr_index in enumerate(ppr_indices, start=1):
+                        paired_pulse_ratios = split(r'\s*[,;]\s*', entries[ppr_index].get_())
+                        if idx < len(paired_pulse_ratios):
+                            try:
+                                ppr = float(paired_pulse_ratios[idx])
+                            except ValueError or TypeError:
+                                ppr = interpolator(i*isi) if interpolator else None
+                        else:
+                            ppr = interpolator(i*isi) if interpolator else None
+                        start_idx, peak_idx = i*3, i*3+1
+                        df.loc[peak_idx] = [i*isi + t_rise, df.loc[start_idx].signal + a_rise * ppr if ppr else None]
+
+                        j += 2.0
+                        t_decay = df.loc[peak_idx].time + ((i + 1.0) * isi - df.loc[peak_idx].time) / j
+                        while t_decay >= (i + 1.0) * isi or (t_decay - df.loc[peak_idx].time) >= tau:
+                            j += 1.0
+                            t_decay = df.loc[peak_idx].time + ((i + 1.0) * isi - df.loc[peak_idx].time) / j
+                        df.loc[start_idx+2] = [
+                            t_decay,
+                            df.loc[peak_idx].signal * exp(-(t_decay - df.loc[peak_idx].time) / tau) if ppr else None]
+                        df.loc[start_idx+3] = [
+                            (i+1.0) * isi,
+                            df.loc[peak_idx].signal * exp(-(isi - t_rise) / tau) if ppr else None]
                 df.time = df.time + 60000 * idx
                 if idx > 0:
                     all_dfs = all_dfs[:-1]
@@ -1289,7 +1326,7 @@ class Main(ScrollableFrame):
             f = filedialog.asksaveasfile(defaultextension=".csv")
             if f is None:  # asksaveasfile return `None` if dialog closed with "cancel".
                 return
-            all_dfs.to_csv(f, index=False, line_terminator='\n')  #
+            all_dfs.to_csv(f, index=False, line_terminator='\n')
 
         def clear_fields():
             for value_ in row_values:
@@ -1314,9 +1351,9 @@ class Main(ScrollableFrame):
                     types['Decay'].set('time constant')
                 if len(df) > 4:
                     entries['ISI'].set(df.loc[3].time - df.loc[0].time)
-                    entries['PPR'].set((df.loc[4].signal - df.loc[3].signal) / a_rise)
-                if len(df) > 7:
-                    entries['3PPR'].set((df.loc[7].signal - df.loc[6].signal) / a_rise)
+                for idx, ppr_index in enumerate(ppr_indices, start=1):
+                    if len(df) > idx*3 + 1:
+                        entries[ppr_index].set((df.loc[idx*3 + 1].signal - df.loc[idx*3].signal) / a_rise)
             window.lift()
 
         Button(window, command=get_data_from_csv, text='Read CSV').grid(row=row - 2, column=1, sticky='NEWS')
@@ -1444,6 +1481,41 @@ class Main(ScrollableFrame):
         Button(u_frame, text="U=", command=lambda: u_value.set(u_calc(failure.get(), msp.get()))).grid(row=1, column=1)
         u_frame.grid(row=6, column=0, sticky='NEWS')
         u_frame.grid_columnconfigure(2, weight=1)
+
+        double_exponential_frame = Frame(window)
+        tau1 = EntryWithPlaceholder(master=double_exponential_frame, placeholder='tau1', width=22)
+        tau2 = EntryWithPlaceholder(master=double_exponential_frame, placeholder='tau2', width=22)
+        a1_ratio = EntryWithPlaceholder(master=double_exponential_frame, placeholder='A1/(A1+A2)', width=22)
+        tau = EntryWithPlaceholder(master=double_exponential_frame, placeholder='single exp tau', width=22,
+                                   state='readonly')
+        tau1.grid(row=0, column=0, sticky='NEWS')
+        tau2.grid(row=0, column=1, sticky='NEWS')
+        a1_ratio.grid(row=0, column=2, sticky='NEWS')
+        tau.grid(row=0, column=4, sticky='NEWS')
+        Button(double_exponential_frame,
+               text="tau=",
+               command=lambda: tau.set(double_exponential_decay(
+                   float(tau1.get()),
+                   float(tau2.get()),
+                   float(a1_ratio.get())
+               ))).grid(row=0, column=3)
+        double_exponential_frame.grid(row=7, column=0, sticky='NEWS')
+        double_exponential_frame.grid_columnconfigure(4, weight=1)
+
+        def double_exponential_decay(tau1, tau2, a1_ratio):
+            from scipy.optimize import curve_fit
+            t = np.arange(100.0, step=0.1)
+            a2_ratio = 1-a1_ratio
+            double_exp_f = a1_ratio * np.exp(-t / tau1) + a2_ratio * np.exp(-t / tau2)
+
+            def single_exponential_f(t, tau):
+                return np.exp(-t/tau)
+            tau = curve_fit(single_exponential_f, t, double_exp_f, 0.5)[0][0]
+            plt.plot(t, double_exp_f, 'ro', label='double exp')
+            plt.plot(t, single_exponential_f(t, tau), 'bo', label='single exp')
+            plt.legend()
+            plt.show(block=False)
+            return tau
 
     def close_last(self, event=None):
         if messagebox.askokcancel('Close', 'Do you want to close the last experiment'):
