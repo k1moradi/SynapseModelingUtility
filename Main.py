@@ -695,19 +695,25 @@ class ExperimentVoltageClamp:
 
     @staticmethod
     @jit(nopython=True, fastmath=True, cache=True)
-    def soft_l1_loss(data_signal, model_signal, error_weight):  # smoothed least square function
-        return (2.0 * ((1.0 + (data_signal - model_signal) ** 2.0) ** 0.5) - 1.0) * error_weight
+    def soft_l1_loss(data_signal, model_signal, weight):  # smoothed least square function
+        return (2.0 * ((1.0 + (data_signal - model_signal) ** 2.0) ** 0.5) - 1.0) * weight
 
     def __init__(self, data_list, init_times, synaptic_reversal_potential, holding_potential, bounds):
         self.BOUNDS = bounds
         self.initTimes = init_times.copy()  # [synTimes in ms]
         self.num_events = len(init_times) + 1
-        self.simulatedSignal, self.dataList, self.normalization_value = [0.0], None, None
+        self.simulatedSignal, self.dataList = [0.0], None
+        self.normalization_value, self.errorWeights = None, []
         self.set_data(data_list)
         self.drivingForce = float(holding_potential) - float(synaptic_reversal_potential)  # in mV
 
     def set_data(self, data_list, weights=None):
         self.dataList = data_list.copy()  # format [[t in ms, i in pA],]
+        if weights:
+            self.errorWeights = weights
+        else:
+            self.errorWeights = [(0.5 if datum[0] in self.initTimes else 1.0) for datum in data_list]
+            self.errorWeights += [self.errorWeights.pop(0)]  # equivalent to rotate(1)
         amp = fabs(data_list[0][1] - data_list[1][1])
         self.normalization_value = (amp if amp != 0.0 else 1.0) * (self.num_events if self.num_events != 0 else 1.0)
 
@@ -720,20 +726,18 @@ class ExperimentVoltageClamp:
         del init_times[0]
         signal = []
         error = 0.0
-        error_weight = 1.0
-        for data_time, data_signal in self.dataList:
+        for ((data_time, data_signal), weight) in zip(self.dataList, self.errorWeights):
             delta_t = data_time - init_time
             if delta_t < 0:
                 signal.append(0)
                 continue
             if init_times and data_time >= init_times[0]:
                 g, x0, y0, u0 = synaptic_event(delta_t, g0, tau_d, tau_r, tau_f, u, u0, x0, y0)
-                init_time, delta_t, error_weight = init_times[0], 0.0, 1.0
+                init_time, delta_t = init_times[0], 0.0
                 del init_times[0]
             signal.append(ExperimentVoltageClamp.synaptic_current(g, delta_t, tau_d, self.drivingForce))
             if not isnan(data_signal):
-                error += ExperimentVoltageClamp.soft_l1_loss(signal[-1], data_signal, error_weight)
-            error_weight /= self.num_events
+                error += ExperimentVoltageClamp.soft_l1_loss(signal[-1], data_signal, weight)
             self.simulatedSignal = signal
         error /= self.normalization_value
         error += ((1 - u/self.BOUNDS[4][1]) * error) if self.num_events == 2 else 0
@@ -1128,8 +1132,9 @@ class Main(ScrollableFrame):
         start_menu.add_command(label="Create a pseudo-trace", command=self.pseudo_trace)
         menu.add_cascade(label="Start", menu=start_menu)
         menu.add_command(label="Options", command=self.options)
-        menu.add_command(label="Calculator", command=self.calculator)
+        menu.add_command(label="Calculators", command=self.calculators)
         menu.add_command(label="Close-the-last", command=self.close_last)
+        menu.add_command(label="Close-all", command=self.close_all)
         self.bind('<Control-o>', self.open)
         self.bind('<Control-w>', self.close_last)
 
@@ -1272,7 +1277,7 @@ class Main(ScrollableFrame):
                 if isi:
                     j = 1.0
                     while t_decay >= isi or t_decay >= tau:
-                        j += 1.0
+                        j += 0.1
                         t_decay = t_rise + (isi - t_rise) / j
                         df.loc[2] = [t_decay, a_rise * exp(-(t_decay - t_rise) / tau)]
                     df.loc[3] = [isi, a_rise * exp(-(isi - t_rise) / tau)]
@@ -1293,6 +1298,10 @@ class Main(ScrollableFrame):
                             ppr_tau = (ppr_ts[1] - ppr_ts[0]) / (log(fabs(ppr_as[0])) - log(fabs(ppr_as[1])))
                             return ppr_as[0] * exp(-(t - ppr_ts[0]) / ppr_tau)
                         print('using single exponential interpolator for PPRs')
+                    elif len(ppr_as) == 2 and ppr_as[1] >= 1:
+                        ppr_ts += [20 * isi]
+                        ppr_as += [1.0]
+                        interpolator = PchipInterpolator(ppr_ts, ppr_as)
                     else:
                         interpolator = None
 
@@ -1311,7 +1320,7 @@ class Main(ScrollableFrame):
                         j += 2.0
                         t_decay = df.loc[peak_idx].time + ((i + 1.0) * isi - df.loc[peak_idx].time) / j
                         while t_decay >= (i + 1.0) * isi or (t_decay - df.loc[peak_idx].time) >= tau:
-                            j += 1.0
+                            j += 0.1
                             t_decay = df.loc[peak_idx].time + ((i + 1.0) * isi - df.loc[peak_idx].time) / j
                         df.loc[start_idx+2] = [
                             t_decay,
@@ -1388,7 +1397,7 @@ class Main(ScrollableFrame):
         Checkbutton(window, variable=show_matrix_plot).grid(
             row=5, column=1, sticky="W")
 
-    def calculator(self):
+    def calculators(self):
 
         def stats(list_, type_='SEM', comment=''):
             list_ = list(
@@ -1437,11 +1446,10 @@ class Main(ScrollableFrame):
         msp.set(global_msp)
         msp.trace('w', lambda *args: globals().update(global_msp=msp.get()))
         OptionMenu(msp_frame, msp, *{'SEM', 'SD', 'IQR'}).grid(row=0, column=1, sticky='W')
-        Label(msp_frame, text='Stats Inputs:', fg='green').grid(row=1, column=0, sticky='W')
+        Label(msp_frame, text='Mean \u00B1 SEM/SD calculator:', fg='green').grid(row=1, column=0, sticky='W')
         msp_frame.grid(row=0, column=0, sticky='W')
 
         width = 100
-        half_width = int(width / 2)
         csv_ = EntryWithPlaceholder(window, placeholder='Comma separated values', width=width)
         csv_.grid(row=1, column=0, sticky='NEWS')
         csv_.grid_columnconfigure(0, weight=1)
@@ -1456,32 +1464,33 @@ class Main(ScrollableFrame):
         stat_frame.grid(row=3, column=0, sticky='NEWS')
         stat_frame.grid_columnconfigure(1, weight=1)
 
-        cm_frame_upper = Frame(window)
-        Label(cm_frame_upper, text='Membrane Properties Inputs:', fg='green').grid(row=0, column=0, sticky='W')
-        tau_ = EntryWithPlaceholder(cm_frame_upper, placeholder='Membrane time constant (ms)', width=half_width)
-        tau_.grid(row=1, column=0, sticky='NEWS')
-        r_in = EntryWithPlaceholder(cm_frame_upper, placeholder='Membrane input resistance (M\u2126)', width=half_width)
-        r_in.grid(row=1, column=1, sticky='NEWS')
-        cm_frame_upper.grid(row=4, column=0)
-        cm_frame_lower = Frame(window)
-        cm__ = EntryWithPlaceholder(cm_frame_lower, state='readonly', placeholder='')
-        cm__.grid(row=0, column=1, sticky='NEWS')
-        Button(cm_frame_lower, text="Membrane capacitance (PF)=", width=22,
-               command=lambda: cm__.set(
-                   round(float(tau_.get())/float(r_in.get())*1000, Experiment.DECIMAL_POINTS))).grid(row=0, column=0)
-        cm_frame_lower.grid(row=5, column=0, sticky='NEWS')
-        cm_frame_lower.grid_columnconfigure(1, weight=1)
+        Label(window, text='Membrane capacitance calculator:', fg='green').grid(row=4, column=0, sticky='W')
+        cm_frame = Frame(window)
+        tau_m = EntryWithPlaceholder(cm_frame, placeholder='Membrane time constant (ms)', width=27)
+        tau_m.grid(row=0, column=0, sticky='NEWS')
+        r_in = EntryWithPlaceholder(cm_frame, placeholder='Membrane input resistance (M\u2126)', width=29)
+        r_in.grid(row=0, column=1, sticky='NEWS')
+        Button(cm_frame, text="Membrane capacitance (PF)=", width=24, command=lambda: cm__.set(
+            round(float(tau_m.get()) / float(r_in.get()) * 1000, Experiment.DECIMAL_POINTS))
+               ).grid(row=0, column=2, sticky='NEWS')
+        cm__ = EntryWithPlaceholder(cm_frame, state='readonly', placeholder='')
+        cm__.grid(row=0, column=3, sticky='NEWS')
+        cm_frame.grid(row=5, column=0, sticky='NEWS')
+        cm_frame.grid_columnconfigure(3, weight=1)
 
+        Label(window, text='U calculator:', fg='green').grid(row=6, column=0, sticky='W')
         u_frame = Frame(window)
-        Label(u_frame, text='U Calculator Inputs:', fg='green').grid(row=0, column=0, sticky='W')
         failure = EntryWithPlaceholder(master=u_frame, placeholder='% Failure MCT\u00B1MS(n=)', width=22)
-        failure.grid(row=1, column=0, sticky='NEWS')
+        failure.grid(row=0, column=0, sticky='NEWS')
         u_value = EntryWithPlaceholder(master=u_frame, placeholder='', state='readonly')
-        u_value.grid(row=1, column=2, sticky='NEWS')
-        Button(u_frame, text="U=", command=lambda: u_value.set(u_calc(failure.get(), msp.get()))).grid(row=1, column=1)
-        u_frame.grid(row=6, column=0, sticky='NEWS')
+        u_value.grid(row=0, column=2, sticky='NEWS')
+        Button(u_frame, text="U=", command=lambda: u_value.set(u_calc(failure.get(), msp.get()))
+               ).grid(row=0, column=1)
+        u_frame.grid(row=7, column=0, sticky='NEWS')
         u_frame.grid_columnconfigure(2, weight=1)
 
+        Label(window, text='Double exponential decay to single exponential decay tau:', fg='green'
+              ).grid(row=8, column=0, sticky='W')
         double_exponential_frame = Frame(window)
         tau1 = EntryWithPlaceholder(master=double_exponential_frame, placeholder='tau1', width=22)
         tau2 = EntryWithPlaceholder(master=double_exponential_frame, placeholder='tau2', width=22)
@@ -1499,7 +1508,7 @@ class Main(ScrollableFrame):
                    float(tau2.get()),
                    float(a1_ratio.get())
                ))).grid(row=0, column=3)
-        double_exponential_frame.grid(row=7, column=0, sticky='NEWS')
+        double_exponential_frame.grid(row=9, column=0, sticky='NEWS')
         double_exponential_frame.grid_columnconfigure(4, weight=1)
 
         def double_exponential_decay(tau1, tau2, a1_ratio):
@@ -1518,10 +1527,19 @@ class Main(ScrollableFrame):
             return tau
 
     def close_last(self, event=None):
-        if messagebox.askokcancel('Close', 'Do you want to close the last experiment'):
+        if messagebox.askokcancel('Close', 'Do you want to close the last experiment?'):
             self.experiments[-1].destroy()
             del self.experiments[-1]
             self.update_scrollbar()
+
+    def close_all(self, event=None):
+        if messagebox.askokcancel('Close all', 'Do you want to close the all the experiments?'):
+            while len(self.experiments) > 0:
+                self.experiments[-1].destroy()
+                del self.experiments[-1]
+            self.update_scrollbar()
+            if Experiment.summary_window:
+                Experiment.summary_window.destroy()
 
 
 # Required for multi-threading on windows
