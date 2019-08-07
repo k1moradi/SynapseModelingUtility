@@ -11,7 +11,7 @@ from os import listdir, path, getcwd, environ, remove, system
 from multiprocessing import freeze_support, Process, Queue
 from queue import Empty
 from tkinter import Tk, Menu, filedialog, Canvas, Scrollbar, Toplevel, Scale, messagebox, TclError
-from tkinter import Frame, Button, Checkbutton, Label, Entry, OptionMenu, StringVar, BooleanVar, IntVar
+from tkinter import Frame, Button, Checkbutton, Label, Entry, OptionMenu, StringVar, BooleanVar, IntVar, DoubleVar
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure, rcParams
 import matplotlib.pyplot as plt
@@ -90,7 +90,7 @@ class Experiment:
         parameters['Rin_max'] = 800.0
         parameters['Cm_max'] = 1000.0
         parameters['g_syn_max'] = 30.0
-        parameters['tau_d_max'] = 30.0
+        parameters['tau_d_max'] = 40.0
         parameters['tau_f_max'] = 30000.0
         parameters['tau_r_max'] = 30000.0
         parameters['U_max'] = 1 - 10**-Experiment.DECIMAL_POINTS
@@ -368,12 +368,17 @@ class Experiment:
                                 lambda event: self.reload_data()if self.parameters['Mode'] == 'current-clamp' else None)
         self.entries['Vm'].bind("<Return>",
                                 lambda event: self.reload_data()if self.parameters['Mode'] == 'current-clamp' else None)
-        self.error, self.bootstrap_counter = StringVar(), IntVar()
+        self.error, self.optimization_time, self.bootstrap_counter = DoubleVar(), StringVar(), IntVar()
         self.bootstrap_counter.set(0)
-        Label(self.lowerBoxFrame, textvariable=self.bootstrap_counter, height=1, justify='right').grid(
-            row=row + 1, column=0)
+        Label(self.lowerBoxFrame, text='Error', height=1).grid(
+            row=row + 1, column=0, sticky="W")
         Label(self.lowerBoxFrame, textvariable=self.error, height=1, justify='right').grid(
-            row=row+1, column=1, columnspan=3)
+            row=row + 1, column=1, sticky="W")
+        Label(self.lowerBoxFrame, textvariable=self.optimization_time, height=1, justify='right').grid(
+            row=row + 1, column=2)
+        Label(self.lowerBoxFrame, textvariable=self.bootstrap_counter, height=1, justify='right').grid(
+            row=row + 1, column=3)
+
         self.lowerBoxFrame.grid(row=1, column=0, pady=(0, 0))
         self.toggle_entries()
 
@@ -487,7 +492,7 @@ class Experiment:
         if round(vm_before, 2) != round(self.parameters['Vm'], 2) and self.parameters['Mode'] == 'current-clamp':
             self.reload_data()
 
-    def run_model(self):
+    def run_model(self, set_error=True):
         self.update_params()
         model_input = [self.parameters[key] for key in self.OPTIMIZATION[0:-2]]
         bounds = tuple((self.parameters[key+'_min'], self.parameters[key+'_max']) for key in self.OPTIMIZATION[0:-2])
@@ -513,7 +518,9 @@ class Experiment:
                 model = ExperimentCurrentClampResistance(*(input_tuple + (bounds,)))
         else:
             raise Exception("optimize function: experimentType should be either voltage-clamp or current-clamp")
-        model.simulate(model_input)
+        error = model.simulate(model_input)
+        if set_error:
+            self.error.set(round(error, Experiment.DECIMAL_POINTS))
         self.plot(self.plotModel, self.get_t_data(), model.simulatedSignal)
         return model
 
@@ -524,7 +531,7 @@ class Experiment:
             self.lowerBoxFrame.after(100, self.process_queue)
 
     def optimize(self):
-        model = self.run_model()
+        model = self.run_model(set_error=False)
         global thread_numbers, population_size, print_results_when_optimization_ends
         MultiProcessOptimization(
             self.queue, model, self.parameters['Mode'], thread_numbers.get(),
@@ -544,8 +551,6 @@ class Experiment:
 
     def show_results(self, results, corrected_signal, optimization_time):
         global ring_bell_when_optimization_ends
-        # set the entries
-        self.error.set('Optimized in %.1f seconds. Error is %.5f' % (optimization_time, results.fun))
         keys = Experiment.KEYS[4:]
         # oder maters here since in results.x[-2] is Rin and results.x[-1] is Cm
         if self.parameterMayNeedOptimization['Rin'].get():
@@ -572,7 +577,7 @@ class Experiment:
             self.toggle_entries()
             fake_high_res_t_data = sorted([float(x) for x in range(int(self.get_t_data()[-1]))] + self.get_t_data())
             fake_high_res_data = [[t, 0] for t in fake_high_res_t_data]
-            model = self.run_model()  # model should run after setting the entries
+            model = self.run_model(set_error=False)  # model should run after setting the entries
             model.set_data(fake_high_res_data, [1.0]*len(fake_high_res_data))
             model.simulate(results.x)
             self.plot(self.plotModel, [row[0] for row in fake_high_res_data], model.simulatedSignal)
@@ -581,6 +586,9 @@ class Experiment:
                 self.experimentFrame.bell()
             if corrected_signal:
                 self.plot(self.plotCorrectedSignal, self.get_t_data(), corrected_signal)
+            # set the entries
+        self.error.set(round(results.fun, Experiment.DECIMAL_POINTS))
+        self.optimization_time.set('Optimized in %.1fs' % optimization_time)
 
     def correct_data(self):
         times = self.plotCorrectedSignal.get_xdata()
@@ -606,8 +614,7 @@ class Experiment:
             if key in Experiment.OPTIMIZATION:
                 model_info[key+'_min'] = [float(self.entries[key+'_min'].get())]
                 model_info[key+'_max'] = [float(self.entries[key+'_max'].get())]
-        model_info['error'] = [float(findall(r'\d+(?:[.]\d+)?', self.error.get())[1])]
-        # model_info['Data'] = [self.plotCorrectedSignal.get_xydata().tolist()]
+        model_info['error'] = [self.error.get()]
         current_data = DataFrame.from_dict(model_info)
         json_file = Experiment.WORKING_DIRECTORY + '/jsons/' + self.FILE_NAME + ".json"
         if path.isfile(json_file):
@@ -671,11 +678,12 @@ class MultiProcessOptimization(Process):
                 self.FILE_NAME,
                 ('number %d' % self.bootstrap_counter) if self.bootstrap_mode else ''
             )
-        self.queue.put([results, corrected_signal, round(time() - t, 2)])
+        self.queue.put([results, corrected_signal, round(time() - t, 1)])
 
 
 @jit(nopython=True, fastmath=True, cache=True)
 def synaptic_event(delta_t, g0, tau_d, tau_r, tau_f, u, u0, x0, y0):
+    # TM Model that depends on tau_d
     tau1r = tau_d / ((tau_d - tau_r) if tau_d != tau_r else 1e-13)
     y_ = y0 * exp(-delta_t / tau_d)
     x_ = 1 + (x0 - 1 + tau1r * y0) * exp(-delta_t / tau_r) - tau1r * y_
@@ -684,6 +692,13 @@ def synaptic_event(delta_t, g0, tau_d, tau_r, tau_f, u, u0, x0, y0):
     y0 = y_ + u0 * x_
     x0 = x_ - u0 * x_
     g = g0 * y0
+
+    # Original TM Model
+    # x_ = 1 + (x0 - 1) * exp(-delta_t / tau_r)
+    # u_ = u + (u0 - u) * exp(-delta_t / tau_f)
+    # g = g0 * u_ * x_
+    # x0 = x_ - u_ * x_
+    # u0 = u_ + u * (1 - u_)
     return g, x0, y0, u0
 
 
@@ -714,18 +729,19 @@ class ExperimentVoltageClamp:
         else:
             self.errorWeights = [(0.5 if datum[0] in self.initTimes else 1.0) for datum in data_list]
             self.errorWeights += [self.errorWeights.pop(0)]  # equivalent to rotate(1)
+            self.errorWeights[1] = 2.0
         amp = fabs(data_list[0][1] - data_list[1][1])
         self.normalization_value = (amp if amp != 0.0 else 1.0) * (self.num_events if self.num_events != 0 else 1.0)
 
     def simulate(self, input_vec):
         g0, tau_d, tau_r, tau_f, u = input_vec
-        x0, y0, u0, delta_t = 1.0, 0.0, 0.0, 0.0
+        error, x0, y0, u0, delta_t = 0.0, 1.0, 0.0, 0.0, 0.0
+        # error, x0, y0, u0, delta_t = 0.0, 1.0, 0.0, u, 0.0  # Original TM Model
         g, x0, y0, u0 = synaptic_event(delta_t, g0, tau_d, tau_r, tau_f, u, u0, x0, y0)
         init_times = self.initTimes.copy()
         init_time = init_times[0]
         del init_times[0]
         signal = []
-        error = 0.0
         for ((data_time, data_signal), weight) in zip(self.dataList, self.errorWeights):
             delta_t = data_time - init_time
             if delta_t < 0:
@@ -878,6 +894,7 @@ class ExperimentCurrentClamp:
     def simulate(self, input_vec):
         self.input_parser(input_vec)
         error, x0, y0, u0, delta_t = 0.0, 1.0, 0.0, 0.0, 0.0
+        # error, x0, y0, u0, delta_t = 1.0, 0.0, u, 0.0  # Original TM Model
         g, x0, y0, u0 = synaptic_event(delta_t, self.g0, self.tau_d, self.tau_r, self.tau_f, self.U, u0, x0, y0)
         signal = self.simulatedSignalHead.copy()
         for delta_ts in self.delta_ts_list:
@@ -1276,8 +1293,8 @@ class Main(ScrollableFrame):
 
                 if isi:
                     j = 1.0
-                    while t_decay >= isi or t_decay >= tau:
-                        j += 0.1
+                    while t_decay >= isi or (t_decay - t_rise) > tau:
+                        j += 0.05
                         t_decay = t_rise + (isi - t_rise) / j
                         df.loc[2] = [t_decay, a_rise * exp(-(t_decay - t_rise) / tau)]
                     df.loc[3] = [isi, a_rise * exp(-(isi - t_rise) / tau)]
@@ -1317,10 +1334,10 @@ class Main(ScrollableFrame):
                         start_idx, peak_idx = i*3, i*3+1
                         df.loc[peak_idx] = [i*isi + t_rise, df.loc[start_idx].signal + a_rise * ppr if ppr else None]
 
-                        j += 2.0
+                        j += 1.0
                         t_decay = df.loc[peak_idx].time + ((i + 1.0) * isi - df.loc[peak_idx].time) / j
-                        while t_decay >= (i + 1.0) * isi or (t_decay - df.loc[peak_idx].time) >= tau:
-                            j += 0.1
+                        while t_decay >= (i + 1.0) * isi or (t_decay - df.loc[peak_idx].time) > tau:
+                            j += 0.05
                             t_decay = df.loc[peak_idx].time + ((i + 1.0) * isi - df.loc[peak_idx].time) / j
                         df.loc[start_idx+2] = [
                             t_decay,
@@ -1412,7 +1429,7 @@ class Main(ScrollableFrame):
             elif type_ == 'SEM':
                 mst = a.std() / n ** 0.5
             comment += ':' if comment else ''
-            stat_ = '%.2f\u00B1%.2f [%.2f to %.2f] (n=%d) {%scalculated=(%s)/%d}' % (
+            stat_ = '%.3f\u00B1%.3f [%.3f to %.3f] (n=%d) {%scalculated=(%s)/%d}' % (
                 np.median(a) if type_ == 'IQR' else a.mean(), mst, a.min(), a.max(), n, comment,
                 "+".join(map(str, a)), n)
             return stat_
@@ -1436,7 +1453,7 @@ class Main(ScrollableFrame):
             mean = 1-mean/100
             conf_80 = 1.282 * mse_v
             conf_95 = 1.960 * mse_v
-            return '80%% = %.2f [%.2f to %.2f], 95%% = %.2f [%.2f to %.2f]' % (
+            return '80%% = %.3f [%.3f to %.3f], 95%% = %.3f [%.3f to %.3f]' % (
                 mean, mean-conf_80, mean+conf_80, mean, mean-conf_95, mean+conf_95)
 
         window = Toplevel(self.mainFrame)
