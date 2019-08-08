@@ -1,18 +1,7 @@
-# being a bit too dynamic
-# pylint: disable=E1101
-from __future__ import division
 import numpy as np
-from pandas.compat import lrange, zip
+import matplotlib.lines as mlines
 from pandas.core.dtypes.missing import notna
 from pandas.plotting._tools import _set_ticks_props, _subplots
-
-
-def _get_marker_compat(marker):
-    import matplotlib.lines as mlines
-    if marker not in mlines.lineMarkers:
-        return 'o'
-    return marker
-
 
 def scatter_matrix(frame, alpha=0.5, figsize=None, ax=None, grid=False,
                    diagonal='hist', marker='.', density_kwds=None,
@@ -53,27 +42,21 @@ def scatter_matrix(frame, alpha=0.5, figsize=None, ax=None, grid=False,
     >>> scatter_matrix(df, alpha=0.2)
     """
 
-
     DECIMAL_POINTS = 3
     df = frame._get_numeric_data()
     n = df.columns.size
     naxes = n * n
     fig, axes = _subplots(naxes=naxes, figsize=figsize, ax=ax, squeeze=False)
-
-    # no gaps between subplots
-    # fig.subplots_adjust(wspace=0.0, hspace=0.0)
     fig.subplots_adjust(wspace=0.081, hspace=0.176, top=0.981, bottom=0.085, left=0.06, right=0.989)
-
     mask = notna(df)
-
+    def _get_marker_compat(marker):
+        if marker not in mlines.lineMarkers:
+            return 'o'
+        return marker
     marker = _get_marker_compat(marker)
-
     hist_kwds = hist_kwds or {}
     density_kwds = density_kwds or {}
-
-    # GH 14855
     kwds.setdefault('edgecolors', 'none')
-
     boundaries_list = []
     for a in df.columns:
         values = df[a].values[mask[a].values]
@@ -81,8 +64,8 @@ def scatter_matrix(frame, alpha=0.5, figsize=None, ax=None, grid=False,
         rdelta_ext = (rmax_ - rmin_) * range_padding / 2. + 10**-DECIMAL_POINTS
         boundaries_list.append((rmin_ - rdelta_ext, rmax_ + rdelta_ext))
 
-    for i, a in zip(lrange(n), df.columns):
-        for j, b in zip(lrange(n), df.columns):
+    for i, a in zip(range(n), df.columns):
+        for j, b in zip(range(n), df.columns):
             ax = axes[i, j]
 
             if i == j:
