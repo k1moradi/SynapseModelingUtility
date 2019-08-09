@@ -304,6 +304,7 @@ class Experiment:
 
         self.experimentFrame = Frame(parent)
         self.experimentFrame.grid(row=Experiment.rowCount, column=0, sticky='NESW')
+        self.experimentFrame.columnconfigure(0, weight=1)
 
         self.topButtonFrame = Frame(self.experimentFrame)
         width = 16
@@ -327,7 +328,7 @@ class Experiment:
             row=1, column=1)
         Button(self.topButtonFrame, text="Summarize", command=self.plot_saved_results, width=width).grid(
             row=1, column=2)
-        self.topButtonFrame.grid(row=0, column=1)
+        self.topButtonFrame.grid(row=0, column=1, padx=(0, 0))
 
         self.lowerBoxFrame = Frame(self.experimentFrame)
         Label(self.lowerBoxFrame, text="Mode:").grid(
@@ -383,13 +384,11 @@ class Experiment:
         self.toggle_entries()
 
         # setup the initial plots
-        self.fig = Figure(figsize=(6, 4), dpi=100 if self.experimentFrame.winfo_screenwidth() > 1280 else 72)
+        self.fig = Figure(figsize=(6, 3.7), dpi=100 if self.experimentFrame.winfo_screenwidth() > 1280 else 72)
         self.fig.subplots_adjust(left=0.07, right=0.98, top=0.93, bottom=0.12)
         self.subplot = self.fig.add_subplot(111)  # n_rows, n_cols, index
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.experimentFrame)
-        self.canvas.get_tk_widget().grid(row=0, column=0, rowspan=len(self.KEYS), sticky='NSEW')
-        self.experimentFrame.columnconfigure(0, weight=1)
-        self.experimentFrame.rowconfigure(0, weight=1)
+        self.canvas.get_tk_widget().grid(row=0, column=0, rowspan=len(self.KEYS), sticky='NEWS')
         self.plotData, = self.subplot.plot([], [], '--bo', color='#1772AE', label='Data')  # blue
         self.plotModel, = self.subplot.plot([], [], '-X', color='#D05F2C', label='Model')  # red
         self.plotCorrectedSignal, = self.subplot.plot([], [], '-.bo', color='#13A075', label='Corrected Data')  # green
