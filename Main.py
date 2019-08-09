@@ -115,7 +115,7 @@ class Experiment:
 
     @staticmethod
     def get_csv_file_as_data_frame(file_name):
-        csv_file = Experiment.WORKING_DIRECTORY + '/' + Experiment.CSVs_FOLDER + '/' + file_name + '.csv'
+        csv_file = path.join(Experiment.WORKING_DIRECTORY, Experiment.CSVs_FOLDER, file_name + '.csv')
         with open(csv_file, 'r') as file_pointer:
             data_frame = read_csv(file_pointer)
             data_frame = data_frame.rename(columns={
@@ -186,9 +186,9 @@ class Experiment:
     @staticmethod
     def delete_file_(file_name, file_extension, message):
         if file_extension == '.json':
-            file_ = Experiment.WORKING_DIRECTORY + '/' + Experiment.JSONs_FOLDER + '/' + file_name + file_extension
+            file_ = path.join(Experiment.WORKING_DIRECTORY, Experiment.JSONs_FOLDER, file_name + file_extension)
         elif file_extension == '.csv':
-            file_ = Experiment.WORKING_DIRECTORY + '/' + Experiment.CSVs_FOLDER + '/' + file_name + file_extension
+            file_ = path.join(Experiment.WORKING_DIRECTORY, Experiment.CSVs_FOLDER, file_name + file_extension)
         if path.isfile(file_):
             user_wants_to_delete = messagebox.askyesno(file_extension + 'File:', message)
             if user_wants_to_delete:
@@ -199,7 +199,7 @@ class Experiment:
         row, width = 0, 60  # 0, 70
         font =('Courier New', 18)
         ref_id, location = findall(r'^(\d+)-?(.*)$', file_name)[0]
-        json_file = Experiment.WORKING_DIRECTORY + '/' + Experiment.JSONs_FOLDER + '/' + file_name + ".json"
+        json_file = path.join(Experiment.WORKING_DIRECTORY, Experiment.JSONs_FOLDER, file_name + ".json")
         if location:
             referencing_stuff = '(n=1)@%s{%s:digitized:modeled already}' % (ref_id, location)
         else:
@@ -1029,9 +1029,11 @@ class ScrollableFrame(Tk):
         self.mainFrame.bind("<Configure>", self._on_main_frame_configure)
         self.mainCanvas.bind("<Configure>", self._on_main_canvas_configure)
         self.mainCanvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.mainCanvas.bind_all("<Button-4>", self._on_mousewheel)
+        self.mainCanvas.bind_all("<Button-5>", self._on_mousewheel)
 
     def display_scrollable_frame(self):
-        self.mainCanvas.grid(row=0, column=0, sticky="NSWE")
+        self.mainCanvas.grid(row=0, column=0, sticky="NEWS")
         self.vertical_scroll_bar.grid(row=0, column=1, sticky='NS')
         self.mainFrame.columnconfigure(0, weight=1)
 
@@ -1054,7 +1056,12 @@ class ScrollableFrame(Tk):
         self.mainCanvas.itemconfig(self.mainWindow, height=new_height, width=self.winfo_width())
 
     def _on_mousewheel(self, event):
-        self.mainCanvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        if event.delta:
+            self.mainCanvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        elif event.num == 5:
+            self.mainCanvas.yview_scroll(1, "units")
+        elif event.num == 4:
+            self.mainCanvas.yview_scroll(-1, "units")
 
     def update_scrollbar(self):
         self.mainCanvas.update()
@@ -1157,10 +1164,10 @@ class Main(ScrollableFrame):
         self.config(menu=menu)
 
         self.working_directory = getcwd()
-        while not path.isdir(self.working_directory + '/' + Main.CSVs_FOLDER):
+        while not path.isdir(path.join(self.working_directory, Main.CSVs_FOLDER)):
             self.working_directory = filedialog.askdirectory(
                 initialdir=".",
-                title="Choose Working Directory: should have a \"" + Main.CSVs_FOLDER + "\" folder")
+                title=path.join("Choose Working Directory: should have a ", Main.CSVs_FOLDER, " folder"))
 
         # setup the experiments
         Experiment.WORKING_DIRECTORY = self.working_directory
@@ -1175,7 +1182,7 @@ class Main(ScrollableFrame):
 
     def _get_all_csv_file_names(self):
         data = []
-        csv_files = listdir(self.working_directory + '/' + Main.CSVs_FOLDER)
+        csv_files = listdir(path.join(self.working_directory, Main.CSVs_FOLDER))
         for csv_file in csv_files:
             file_name, file_ext = path.splitext(csv_file)
             if file_ext.lower() != '.csv':
