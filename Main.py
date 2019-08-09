@@ -327,7 +327,7 @@ class Experiment:
             row=1, column=1)
         Button(self.topButtonFrame, text="Summarize", command=self.plot_saved_results, width=width).grid(
             row=1, column=2)
-        self.topButtonFrame.grid(row=0, column=0)
+        self.topButtonFrame.grid(row=0, column=1)
 
         self.lowerBoxFrame = Frame(self.experimentFrame)
         Label(self.lowerBoxFrame, text="Mode:").grid(
@@ -379,7 +379,7 @@ class Experiment:
         Label(self.lowerBoxFrame, textvariable=self.bootstrap_counter, height=1, justify='right').grid(
             row=row + 1, column=3)
 
-        self.lowerBoxFrame.grid(row=1, column=0, pady=(0, 0))
+        self.lowerBoxFrame.grid(row=1, column=1, pady=(0, 0))
         self.toggle_entries()
 
         # setup the initial plots
@@ -387,14 +387,16 @@ class Experiment:
         self.fig.subplots_adjust(left=0.07, right=0.98, top=0.93, bottom=0.12)
         self.subplot = self.fig.add_subplot(111)  # n_rows, n_cols, index
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.experimentFrame)
-        self.canvas.get_tk_widget().grid(row=0, column=1, rowspan=len(self.KEYS), sticky='NSEW')
-        self.experimentFrame.columnconfigure(1, weight=1)
-        self.experimentFrame.rowconfigure(1, weight=1)
-        self.plotData, = self.subplot.plot([], [], '--bo', color='blue', label='Data')
-        self.plotModel, = self.subplot.plot([], [], '-X', color='red', label='Model')
-        self.plotCorrectedSignal, = self.subplot.plot([], [], '-.bo', color='green', label='Corrected Data')
-        self.plotInitTimes, = self.subplot.plot([], [], 'P', color='magenta', label='Init')
-        self.subplot.set_title(self.FILE_NAME, fontsize=14, x=0.8, y=1)
+        self.canvas.get_tk_widget().grid(row=0, column=0, rowspan=len(self.KEYS), sticky='NSEW')
+        self.experimentFrame.columnconfigure(0, weight=1)
+        self.experimentFrame.rowconfigure(0, weight=1)
+        self.plotData, = self.subplot.plot([], [], '--bo', color='#1772AE', label='Data')  # blue
+        self.plotModel, = self.subplot.plot([], [], '-X', color='#D05F2C', label='Model')  # red
+        self.plotCorrectedSignal, = self.subplot.plot([], [], '-.bo', color='#13A075', label='Corrected Data')  # green
+        self.plotInitTimes, = self.subplot.plot([], [], 'P', color='#CB78A6', label='Init')  # magenta
+        self.fig.patch.set_facecolor('#F0F0F0')  # light grey
+        self.subplot.set_facecolor('#F0F0F0')
+        self.subplot.set_title(self.FILE_NAME, fontsize=14, y=1, loc='right')
         self.subplot.set_autoscale_on(True)
         self.subplot.set_ylabel(Experiment.signal_label(self.parameters['Mode']), fontsize=12)
         self.subplot.set_xlabel("time (ms)", fontsize=12)
@@ -404,11 +406,9 @@ class Experiment:
         self.subplot.legend(loc='center right', ncol=1, borderaxespad=0.)
         # add toolbar
         self.toolbarFrame = Frame(self.experimentFrame)
-        self.toolbarFrame.place(
-            relx=0.0, rely=0.0, anchor="se", width=500, y=33,
-            x=width * 3 * 19 + 3 if self.experimentFrame.winfo_screenwidth() > 1280 else width * 3 * 18 + 3)
+        self.toolbarFrame.place(relx=0.0, rely=0.0, anchor="nw", width=420)
         self.toolbar = NavigationToolbar2Tk(self.canvas, self.toolbarFrame)
-        self.toolbar.configure(bg='white')
+        self.toolbar.configure(bg='#F0F0F0')
         self.queue = Queue()  # needed for multi-threading
         self.current_clamp_error_weights = None
 
