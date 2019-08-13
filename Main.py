@@ -277,7 +277,7 @@ class Experiment:
                     plt.annotate(annotation, xy=(0.365, 0.67), xycoords='figure fraction',
                                  size=24 if window.master.winfo_screenwidth() > 1280 else 16)
                     plt.show(block=False)
-            except FileNotFoundError:
+            except FileNotFoundError or PermissionError or TimeoutError:
                 console_print += '  Optimization results available yet to be summarized!\n'
                 pass
             console_print += '\33[36m  Peak\33[0m:% 11.2f%s\n' % (amplitude, referencing_stuff)
@@ -364,7 +364,7 @@ class Experiment:
                 self.parameterMayNeedOptimization[key] = BooleanVar()
                 self.parameterMayNeedOptimization[key].set(False)
                 self.checkButton[key] = Checkbutton(self.lowerBoxFrame, variable=self.parameterMayNeedOptimization[key])
-                self.checkButton[key].grid(row=row, column=4)
+                self.checkButton[key].grid(row=row, column=4, sticky='W')
         self.entries['Vm'].bind("<FocusOut>",
                                 lambda event: self.reload_data()if self.parameters['Mode'] == 'current-clamp' else None)
         self.entries['Vm'].bind("<Return>",
@@ -390,7 +390,7 @@ class Experiment:
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.experimentFrame)
         self.canvas.get_tk_widget().grid(row=0, column=0, rowspan=len(self.KEYS), sticky='NEWS')
         self.plotData, = self.subplot.plot([], [], '--bo', color='#1772AE', label='Data')  # blue
-        self.plotModel, = self.subplot.plot([], [], '-X', color='#D05F2C', label='Model')  # red
+        self.plotModel, = self.subplot.plot([], [], ':X', color='#D05F2C', label='Model')  # red
         self.plotCorrectedSignal, = self.subplot.plot([], [], '-.bo', color='#13A075', label='Corrected Data')  # green
         self.plotInitTimes, = self.subplot.plot([], [], 'P', color='#CB78A6', label='Init')  # magenta
         self.fig.patch.set_facecolor('#F0F0F0')  # light grey
@@ -1021,7 +1021,7 @@ class ScrollableFrame(Tk):
     def __init__(self, *args, **kwargs):
         Tk.__init__(self, *args, **kwargs)  # make a window
         self.mainCanvas = Canvas(self, borderwidth=0)
-        self.vertical_scroll_bar = Scrollbar(self, orient='vertical', command=self.mainCanvas.yview)
+        self.vertical_scroll_bar = Scrollbar(self, orient='vertical', command=self.mainCanvas.yview, width=10)
         self.mainCanvas.configure(yscrollcommand=self.vertical_scroll_bar.set)
         self.mainFrame = Frame(self.mainCanvas)
         self.mainWindow = self.mainCanvas.create_window(
@@ -1034,7 +1034,7 @@ class ScrollableFrame(Tk):
 
     def display_scrollable_frame(self):
         self.mainCanvas.grid(row=0, column=0, sticky="NEWS")
-        self.vertical_scroll_bar.grid(row=0, column=1, sticky='NS')
+        self.vertical_scroll_bar.grid(row=0, column=1, sticky='NEWS')
         self.mainFrame.columnconfigure(0, weight=1)
 
     def _on_main_frame_configure(self, event):
@@ -1425,9 +1425,11 @@ class Main(ScrollableFrame):
         def stats(list_, type_='SEM', comment=''):
             list_ = list(
                 map(float, split(
-                    r"(?:(?:\s*\u00B1\s*\d+(?:\.\d+)?(?:e\d+)?\s*)?(?:\s*\[\d+(?:\.\d+)?(?:e\d+)? to \d+(?:\.\d+)?(?:e"
-                    r"\d+)?\]\s*)?(?:\s*\(n=\d+\)\s*)?(?:\s*{.*?}\s*)?(?:\s*@\d+\s*(?:&\d+)*)?(?:\s*{.*?}\s*)?)?\s*[;,]"
-                    r"\s*", list_)))
+                    r"(?:(?:\s*\u00B1\s*\d+(?:\.\d+)?(?:e\d+)?\s*)?"
+                    r"(?:\s*\[\s*(?:-?\d+(?:\.\d+)?(?:e\d+)? to -?\d+(?:\.\d+)?(?:e\d+)?|"
+                    r"[<>]-?\d+(?:\.\d+)?(?:e\d+)?)\s*\]\s*)?"
+                    r"(?:\s*\(\s*n=\d+\s*\)\s*)?"
+                    r"(?:\s*{.*?}\s*)?(?:\s*@\d+\s*(?:&\d+)*)?(?:\s*{.*?}\s*)?)?\s*[;,]\s*", list_)))
             a, n = np.array(list_), len(list_)
             (iqr25, iqr75), mst = np.percentile(a, [75, 25]), a.std()
             if type_ == 'IQR':
