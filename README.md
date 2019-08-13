@@ -3,7 +3,7 @@ A GUI to model synaptic recordings
 
 This GUI helps simulate synaptic electrophysiology recordings efficiently. Currently, it only supports Tsodyks and Markram's short-term plasticity model. Both voltage-clamp and current-clamp traces are supported. We also allow the generation of pseudo-traces knowing measures of synaptic activity like the rise and decay times, and paired-pulse ratios. Parallel optimization of multiple traces is allowed. Modeling and optimization for most traces take a few seconds using parallel processing, analog mathematical solutions and just-in-time compilation of some of the functions.
 
-![image](https://user-images.githubusercontent.com/18602635/59128584-74aa4300-8938-11e9-9b16-85b3f4b221f6.png)
+![image](https://user-images.githubusercontent.com/18602635/62956427-ed0e0400-bdc0-11e9-99f7-3a21b997141f.png)
 
 ## Installation
 The program is tested on standard python 3 [anaconda distribution](https://www.anaconda.com/distribution/). If you use anaconda all the dependencies will be taken care of. Then, just copy Main.py and my_scatter_matrix.py files in a folder on your computer, and create two subfolders named "csvs" and "jsons" in it and run the Main.py.
