@@ -195,7 +195,7 @@ class Experiment:
                 remove(file_)
 
     @staticmethod
-    def plot_saved_results_(file_name, window, amplitude, ppr, isi):
+    def plot_saved_results_(file_name, window, amplitude, ppr, isi, recording_mode):
         row, width = 0, 60  # 0, 70
         font =('Courier New', 18)
         ref_id, location = findall(r'^(\d+)-?(.*)$', file_name)[0]
@@ -225,8 +225,9 @@ class Experiment:
                        ('Peak', 'green')]
         if ppr:
             keys_colors += [('2/1PPR', 'green'), ('ISI', 'green'), ('ST-P', 'green')]
-        for row, key_color in enumerate(keys_colors, start=1):
-            key, color = key_color
+        if recording_mode == "current-clamp":
+            keys_colors += [('Cm', 'brown'), ('Rin', 'brown')]
+        for row, (key, color) in enumerate(keys_colors, start=1):
             Label(window, text=key+':', font=font, anchor="e").grid(row=row, column=0, sticky="NEWS")
             entries[key] = EntryWithPlaceholder(master=window, color=color, state='readonly', width=width, font=font)
             entries[key].grid(row=row, column=1, sticky="WE")
@@ -253,6 +254,8 @@ class Experiment:
                 if len(df) > n:
                     df = df.sort_values(by=['error']).head(n)
                 keys = ['g_syn', 'tau_d', 'tau_r', 'tau_f', 'U', 'error']
+                if recording_mode == 'current-clamp':
+                    keys += ['Cm', 'Rin']
                 df = df[keys]
                 df_description = df.describe()
                 annotation = '\n File: %s (n=%d)\n' % (file_name, len(df))
@@ -634,7 +637,8 @@ class Experiment:
             second_t_peak, second_y_peak = data[second_event_start_index+peak_idx]
             ppr = abs((second_y_peak - second_y0) / amplitude)
             isi = init_times[1] - init_times[0]
-        Experiment.plot_saved_results_(self.FILE_NAME, Toplevel(self.experimentFrame), amplitude, ppr, isi)
+        Experiment.plot_saved_results_(self.FILE_NAME, Toplevel(self.experimentFrame), amplitude, ppr, isi,
+                                       self.parameters['Mode'])
 
 
 class MultiProcessOptimization(Process):
@@ -1180,6 +1184,9 @@ class Main(ScrollableFrame):
         # Show the frame and scrollbar
         self.display_scrollable_frame()
 
+        # To speedup closing the windows
+        self.protocol("WM_DELETE_WINDOW", self.on_exit)
+
     def _get_all_csv_file_names(self):
         data = []
         csv_files = listdir(path.join(self.working_directory, Main.CSVs_FOLDER))
@@ -1557,14 +1564,19 @@ class Main(ScrollableFrame):
             del self.experiments[-1]
             self.update_scrollbar()
 
-    def close_all(self, event=None):
-        if messagebox.askokcancel('Close all', 'Do you want to close the all the experiments?'):
+    def close_all(self, assume_yes=False, event=None):
+        if assume_yes or messagebox.askokcancel('Close all', 'Do you want to close the all the experiments?'):
             while len(self.experiments) > 0:
                 self.experiments[-1].destroy()
                 del self.experiments[-1]
             self.update_scrollbar()
             if Experiment.summary_window:
                 Experiment.summary_window.destroy()
+
+    def on_exit(self):
+        if messagebox.askyesno("Exit", "Do you want to quit the application?"):
+            self.close_all(assume_yes=True)
+            self.destroy()
 
 
 # Required for multi-threading on windows
