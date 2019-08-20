@@ -249,7 +249,7 @@ class Experiment:
                 system('clear')
             console_print = '\n\33[36m  File\33[0m:\33[31m%s\33[0m\n' % file_name
             try:
-                n = bootstrap_max_iteration.get()+1
+                n = bootstrap_max_iteration.get()
                 df = Experiment.get_json_file_as_data_frame(json_file)
                 if len(df) > n:
                     df = df.sort_values(by=['error']).head(n)
@@ -412,6 +412,7 @@ class Experiment:
         self.toolbar = NavigationToolbar2Tk(self.canvas, self.toolbarFrame)
         self.toolbar.configure(bg='#F0F0F0')
         self.queue = Queue()  # needed for multi-threading
+        self.processes_in_the_queue = 0
         self.current_clamp_error_weights = None
 
     def destroy(self, e=None):
@@ -494,6 +495,26 @@ class Experiment:
         if round(vm_before, 2) != round(self.parameters['Vm'], 2) and self.parameters['Mode'] == 'current-clamp':
             self.reload_data()
 
+    def disable_widgets(self):
+        if self.optimizeButton['state'] != 'disabled':
+            self.optimizeButton.configure(state='disabled')
+            for frame in self.experimentFrame.winfo_children():
+                if frame.winfo_class() == 'Toplevel':
+                    continue
+                for child in frame.winfo_children():
+                    if child.winfo_class() not in ['Frame', 'Label'] and child.cget('text') != 'Summarize':
+                        child.configure(state='disabled') if child.winfo_class() != 'Entry' \
+                            else child.configure(state='readonly')
+
+    def enable_widgets(self):
+        self.optimizeButton.configure(state='normal')
+        for frame in self.experimentFrame.winfo_children():  # enable button if optimization had results
+            if frame.winfo_class() == 'Toplevel':
+                continue
+            for child in frame.winfo_children():
+                if child.winfo_class() != 'Frame':
+                    child.configure(state='normal')
+
     def run_model(self, set_error=True):
         self.update_params()
         model_input = [self.parameters[key] for key in self.OPTIMIZATION[0:-2]]
@@ -527,31 +548,39 @@ class Experiment:
         return model
 
     def process_queue(self):
+        global running_processes
         try:  # check the queue for the optimization results then show result
-            self.show_results(*self.queue.get(block=False))
+            self.handle_results(*self.queue.get(block=False))
+            running_processes -= 1
+            self.processes_in_the_queue -= 1
         except Empty:
+            pass
+        if self.processes_in_the_queue > 0:
             self.lowerBoxFrame.after(100, self.process_queue)
 
     def optimize(self):
+        self.disable_widgets()
+        global process_numbers, running_processes, population_size, print_results_when_optimization_ends
+        available_processes = process_numbers.get() - running_processes
+        if available_processes <= 0:
+            self.lowerBoxFrame.after(1000, self.optimize)
+            return 0
         model = self.run_model(set_error=False)
-        global thread_numbers, population_size, print_results_when_optimization_ends
-        MultiProcessOptimization(
-            self.queue, model, self.parameters['Mode'], thread_numbers.get(),
-            population_size.get()*(1 if self.bootstrap_mode.get() or self.parameters['Mode'] == 'voltage-clamp' else 2),
-            self.bootstrap_counter.get(), self.bootstrap_mode.get(), self.FILE_NAME,
-            print_results_when_optimization_ends.get()
-        ).start()
+        for i in range(available_processes if self.bootstrap_mode.get() else 1):
+            running_processes += 1
+            self.processes_in_the_queue += 1
+            MultiProcessOptimization(
+                self.queue, model,
+                1 if self.bootstrap_mode.get() or self.parameters['Mode'] == 'voltage-clamp' else process_numbers.get(),
+                population_size.get()*(
+                    1 if self.bootstrap_mode.get() or self.parameters['Mode'] == 'voltage-clamp' else 2),
+                self.bootstrap_counter.get(), self.bootstrap_mode.get(), self.FILE_NAME,
+                print_results_when_optimization_ends.get()
+            ).start()
+        self.bootstrap_counter.set(self.bootstrap_counter.get() + i + 1)
         self.lowerBoxFrame.after(100, self.process_queue)
-        self.optimizeButton.configure(state='disabled')
-        for frame in self.experimentFrame.winfo_children():
-            if frame.winfo_class() == 'Toplevel':
-                continue
-            for child in frame.winfo_children():
-                if child.winfo_class() not in ['Frame', 'Label'] and child.cget('text') != 'Summarize':
-                    child.configure(state='disabled') if child.winfo_class() != 'Entry' \
-                        else child.configure(state='readonly')
 
-    def show_results(self, results, corrected_signal, optimization_time):
+    def handle_results(self, results, corrected_signal, optimization_time):
         global ring_bell_when_optimization_ends
         keys = Experiment.KEYS[4:]
         # oder maters here since in results.x[-2] is Rin and results.x[-1] is Cm
@@ -562,35 +591,29 @@ class Experiment:
         for key, result in zip(keys, results.x):
             self.parameters[key] = result
             self.entries[key].set(round(result, Experiment.DECIMAL_POINTS))
-
+        self.error.set(round(results.fun, Experiment.DECIMAL_POINTS))
+        self.optimization_time.set('Optimized in %.1fs' % optimization_time)
         if self.bootstrap_mode.get() and self.bootstrap_counter.get() < bootstrap_max_iteration.get():
-            self.bootstrap_counter.set(self.bootstrap_counter.get()+1)
             self.save()
             self.optimize()
         else:
-            # enable GUI widgets
-            self.optimizeButton.configure(state='normal')
-            for frame in self.experimentFrame.winfo_children():  # enable button if optimization had results
-                if frame.winfo_class() == 'Toplevel':
-                    continue
-                for child in frame.winfo_children():
-                    if child.winfo_class() != 'Frame':
-                        child.configure(state='normal')
-            self.toggle_entries()
-            fake_high_res_t_data = sorted([float(x) for x in range(int(self.get_t_data()[-1]))] + self.get_t_data())
-            fake_high_res_data = [[t, 0] for t in fake_high_res_t_data]
-            model = self.run_model(set_error=False)  # model should run after setting the entries
-            model.set_data(fake_high_res_data, [1.0]*len(fake_high_res_data))
-            model.simulate(results.x)
-            self.plot(self.plotModel, [row[0] for row in fake_high_res_data], model.simulatedSignal)
-            self.bootstrap_counter.set(0)
-            if ring_bell_when_optimization_ends.get():
-                self.experimentFrame.bell()
-            if corrected_signal:
-                self.plot(self.plotCorrectedSignal, self.get_t_data(), corrected_signal)
-            # set the entries
-        self.error.set(round(results.fun, Experiment.DECIMAL_POINTS))
-        self.optimization_time.set('Optimized in %.1fs' % optimization_time)
+            if self.processes_in_the_queue > 1:  # 1 since we reduce processes_in_the_queue after current function exec
+                self.save()
+            else:
+                # enable GUI widgets
+                self.enable_widgets()
+                self.toggle_entries()
+                self.bootstrap_counter.set(0)
+                fake_high_res_t_data = sorted([float(x) for x in range(int(self.get_t_data()[-1]))] + self.get_t_data())
+                fake_high_res_data = [[t, 0] for t in fake_high_res_t_data]
+                model = self.run_model(set_error=False)  # model should run after setting the entries
+                model.set_data(fake_high_res_data, [1.0]*len(fake_high_res_data))
+                model.simulate(results.x)
+                self.plot(self.plotModel, [row[0] for row in fake_high_res_data], model.simulatedSignal)
+                if ring_bell_when_optimization_ends.get():
+                    self.experimentFrame.bell()
+                if corrected_signal:
+                    self.plot(self.plotCorrectedSignal, self.get_t_data(), corrected_signal)
 
     def correct_data(self):
         times = self.plotCorrectedSignal.get_xdata()
@@ -642,12 +665,11 @@ class Experiment:
 
 
 class MultiProcessOptimization(Process):
-    def __init__(self, queue_, model, mode, thread_numbers_, population_size_, counter, bootstrap_mode, file_name,
+    def __init__(self, queue_, model, thread_numbers_, population_size_, counter, bootstrap_mode, file_name,
                  print_results_when_optimization_ends_):
         Process.__init__(self)
         self.queue = queue_
         self.model = model
-        self.mode = mode
         self.thread_numbers = thread_numbers_
         self.population_size = population_size_
         self.bootstrap_counter = counter
@@ -662,11 +684,10 @@ class MultiProcessOptimization(Process):
             bounds=self.model.BOUNDS,  # differential_evolution params
             strategy='best2bin',
             polish=True,
-            updating='deferred' if (self.mode == 'current-clamp' and self.thread_numbers > 1) else 'immediate',
-            workers=self.thread_numbers if self.mode == 'current-clamp' else 1,
+            updating='deferred' if self.thread_numbers > 1 else 'immediate',
+            workers=self.thread_numbers,
             popsize=self.population_size,
             maxiter=10000000,
-            # mutation=(0.1, 1),
             tol=10**-Experiment.DECIMAL_POINTS
         )
         if self.bootstrap_mode:
@@ -1380,19 +1401,20 @@ class Main(ScrollableFrame):
                     df.columns[1]: "signal"})
                 if len(df) > 1:
                     t_rise, a_rise = df.loc[1].time - df.loc[0].time, df.loc[1].signal - df.loc[0].signal
-                    entries['Signal'].set(a_rise)
-                    entries['Rise'].set(t_rise)
+                    entries['Signal'].set(round(a_rise, Experiment.DECIMAL_POINTS))
+                    entries['Rise'].set(round(t_rise, Experiment.DECIMAL_POINTS))
                 if len(df) > 2:
                     t_decay, a_decay = df.loc[2].time - df.loc[0].time, df.loc[2].signal - df.loc[0].signal
                     types['Rise'].set('0-100%')
                     tau = (t_decay - t_rise) / (log(fabs(a_rise)) - log(fabs(a_decay)))
-                    entries['Decay'].set(tau)
+                    entries['Decay'].set(round(tau, Experiment.DECIMAL_POINTS))
                     types['Decay'].set('time constant')
                 if len(df) > 4:
-                    entries['ISI'].set(df.loc[3].time - df.loc[0].time)
+                    entries['ISI'].set(round(df.loc[3].time - df.loc[0].time, 2))
                 for idx, ppr_index in enumerate(ppr_indices, start=1):
                     if len(df) > idx*3 + 1:
-                        entries[ppr_index].set((df.loc[idx*3 + 1].signal - df.loc[idx*3].signal) / a_rise)
+                        entries[ppr_index].set(round((df.loc[idx*3 + 1].signal - df.loc[idx*3].signal) / a_rise,
+                                                     Experiment.DECIMAL_POINTS))
             window.lift()
 
         Button(window, command=get_data_from_csv, text='Read CSV').grid(row=row - 2, column=1, sticky='NEWS')
@@ -1402,9 +1424,9 @@ class Main(ScrollableFrame):
     def options(self):
         window = Toplevel(self)
         window.grab_set()  # make the main window unclickable until closing the settings window
-        Label(window, text='Current-clamp process numbers:').grid(
+        Label(window, text='Process numbers:').grid(
             row=0, column=0, sticky="W")
-        Scale(window, from_=1, to=cpu_count(), variable=thread_numbers, orient='horizontal').grid(
+        Scale(window, from_=1, to=cpu_count(), variable=process_numbers, orient='horizontal').grid(
             row=0, column=1, sticky="W")
         Label(window, text='Optimizer population size:').grid(
             row=1, column=0, sticky="W")
@@ -1583,12 +1605,13 @@ class Main(ScrollableFrame):
 if __name__ == '__main__':
     freeze_support()
     app = Main()
-    thread_numbers = IntVar()
-    thread_numbers.set(cpu_count(logical=True) - (0 if cpu_count(logical=False) == cpu_count(logical=True) else 2))
+    process_numbers = IntVar()
+    process_numbers.set(cpu_count(logical=True) - (0 if cpu_count(logical=False) == cpu_count(logical=True) else 2))
+    running_processes = 0
     population_size = IntVar()
     population_size.set(15)
     bootstrap_max_iteration = IntVar()
-    bootstrap_max_iteration.set(29)
+    bootstrap_max_iteration.set(30)
     ring_bell_when_optimization_ends = BooleanVar()
     ring_bell_when_optimization_ends.set(True)
     print_results_when_optimization_ends = BooleanVar()
