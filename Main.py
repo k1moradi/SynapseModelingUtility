@@ -413,6 +413,9 @@ class Experiment:
         self.toolbar.configure(bg='#F0F0F0')
         self.queue = Queue()  # needed for multi-threading
         self.processes_in_the_queue = 0
+        self.after_job_id = None
+        self.bootstrap_mode.trace(
+            'w', lambda *args: self.lowerBoxFrame.after_cancel(self.after_job_id) if self.after_job_id else None)
         self.current_clamp_error_weights = None
 
     def destroy(self, e=None):
@@ -556,19 +559,13 @@ class Experiment:
         except Empty:
             pass
         if self.processes_in_the_queue > 0:
-            self.lowerBoxFrame.after(100, self.process_queue)
+            self.lowerBoxFrame.after(500, self.process_queue)
 
     def optimize(self):
         self.disable_widgets()
         global process_numbers, running_processes, population_size, print_results_when_optimization_ends
-        available_processes = process_numbers.get() - running_processes
-        if available_processes <= 0:
-            self.lowerBoxFrame.after(1000, self.optimize)
-            return 0
-        model = self.run_model(set_error=False)
-        for i in range(available_processes if self.bootstrap_mode.get() else 1):
-            running_processes += 1
-            self.processes_in_the_queue += 1
+        if (process_numbers.get() - running_processes) > 0:
+            model = self.run_model(set_error=False)
             MultiProcessOptimization(
                 self.queue, model,
                 1 if self.bootstrap_mode.get() or self.parameters['Mode'] == 'voltage-clamp' else process_numbers.get(),
@@ -577,11 +574,18 @@ class Experiment:
                 self.bootstrap_counter.get(), self.bootstrap_mode.get(), self.FILE_NAME,
                 print_results_when_optimization_ends.get()
             ).start()
-        self.bootstrap_counter.set(self.bootstrap_counter.get() + i + 1)
-        self.lowerBoxFrame.after(100, self.process_queue)
+            self.processes_in_the_queue += 1
+            running_processes += 1
+            self.bootstrap_counter.set(self.bootstrap_counter.get() + 1)
+            self.lowerBoxFrame.after(500, self.process_queue)
+        else:
+            self.after_job_id = self.lowerBoxFrame.after(2000, self.optimize)
+            return 0
+        if self.bootstrap_mode.get() and self.bootstrap_counter.get() < bootstrap_max_iteration.get():
+            self.optimize()
 
     def handle_results(self, results, corrected_signal, optimization_time):
-        global ring_bell_when_optimization_ends
+        global ring_bell_when_optimization_ends, bootstrap_max_iteration
         keys = Experiment.KEYS[4:]
         # oder maters here since in results.x[-2] is Rin and results.x[-1] is Cm
         if self.parameterMayNeedOptimization['Rin'].get():
@@ -593,27 +597,25 @@ class Experiment:
             self.entries[key].set(round(result, Experiment.DECIMAL_POINTS))
         self.error.set(round(results.fun, Experiment.DECIMAL_POINTS))
         self.optimization_time.set('Optimized in %.1fs' % optimization_time)
-        if self.bootstrap_mode.get() and self.bootstrap_counter.get() < bootstrap_max_iteration.get():
+        if (self.bootstrap_counter.get() - self.processes_in_the_queue + 1) < bootstrap_max_iteration.get() and \
+            (self.processes_in_the_queue > 1 or self.bootstrap_mode.get()):
             self.save()
-            self.optimize()
         else:
-            if self.processes_in_the_queue > 1:  # 1 since we reduce processes_in_the_queue after current function exec
-                self.save()
-            else:
-                # enable GUI widgets
-                self.enable_widgets()
-                self.toggle_entries()
-                self.bootstrap_counter.set(0)
-                fake_high_res_t_data = sorted([float(x) for x in range(int(self.get_t_data()[-1]))] + self.get_t_data())
-                fake_high_res_data = [[t, 0] for t in fake_high_res_t_data]
-                model = self.run_model(set_error=False)  # model should run after setting the entries
-                model.set_data(fake_high_res_data, [1.0]*len(fake_high_res_data))
-                model.simulate(results.x)
-                self.plot(self.plotModel, [row[0] for row in fake_high_res_data], model.simulatedSignal)
-                if ring_bell_when_optimization_ends.get():
-                    self.experimentFrame.bell()
-                if corrected_signal:
-                    self.plot(self.plotCorrectedSignal, self.get_t_data(), corrected_signal)
+            # enable GUI widgets
+            self.enable_widgets()
+            self.toggle_entries()
+            self.bootstrap_counter.set(0)
+            self.after_job_id = None
+            fake_high_res_t_data = sorted([float(x) for x in range(int(self.get_t_data()[-1]))] + self.get_t_data())
+            fake_high_res_data = [[t, 0] for t in fake_high_res_t_data]
+            model = self.run_model(set_error=False)  # model should run after setting the entries
+            model.set_data(fake_high_res_data, [1.0]*len(fake_high_res_data))
+            model.simulate(results.x)
+            self.plot(self.plotModel, [row[0] for row in fake_high_res_data], model.simulatedSignal)
+            if ring_bell_when_optimization_ends.get():
+                self.experimentFrame.bell()
+            if corrected_signal:
+                self.plot(self.plotCorrectedSignal, self.get_t_data(), corrected_signal)
 
     def correct_data(self):
         times = self.plotCorrectedSignal.get_xdata()
@@ -1596,7 +1598,7 @@ class Main(ScrollableFrame):
                 Experiment.summary_window.destroy()
 
     def on_exit(self):
-        if messagebox.askyesno("Exit", "Do you want to quit the application?"):
+        if not self.experiments or messagebox.askyesno("Exit", "Do you want to quit the application?"):
             self.close_all(assume_yes=True)
             self.destroy()
 
