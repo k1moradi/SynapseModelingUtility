@@ -95,6 +95,9 @@ class Experiment:
         parameters['tau_r_max'] = 30000.0
         parameters['U_max'] = 1 - 10**-Experiment.DECIMAL_POINTS
 
+        parameters['isCmOptimized'] = False
+        parameters['isRinOptimized'] = False
+
         json_file = path.join(Experiment.WORKING_DIRECTORY, Experiment.JSONs_FOLDER, file_name + '.json')
         if path.isfile(json_file):
             loaded_parameters = Experiment.get_json_file_as_dict_list(json_file)[0]
@@ -365,7 +368,7 @@ class Experiment:
                 self.entries[key].grid(row=row, column=1, columnspan=3, sticky='WENS')
             if key in Experiment.MAY_NEED_OPTIMIZATION:
                 self.parameterMayNeedOptimization[key] = BooleanVar()
-                self.parameterMayNeedOptimization[key].set(False)
+                self.parameterMayNeedOptimization[key].set(int(self.parameters['is'+key+'Optimized']))
                 self.checkButton[key] = Checkbutton(self.lowerBoxFrame, variable=self.parameterMayNeedOptimization[key])
                 self.checkButton[key].grid(row=row, column=4, sticky='W')
         self.entries['Vm'].bind("<FocusOut>",
@@ -642,6 +645,8 @@ class Experiment:
                 model_info[key+'_min'] = [float(self.entries[key+'_min'].get())]
                 model_info[key+'_max'] = [float(self.entries[key+'_max'].get())]
         model_info['error'] = [self.error.get()]
+        model_info['isCmOptimized'] = [self.parameterMayNeedOptimization['Cm'].get()]
+        model_info['isRinOptimized'] = [self.parameterMayNeedOptimization['Rin'].get()]
         current_data = DataFrame.from_dict(model_info)
         json_file = Experiment.WORKING_DIRECTORY + '/jsons/' + self.FILE_NAME + ".json"
         if path.isfile(json_file):
