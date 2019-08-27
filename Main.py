@@ -414,12 +414,14 @@ class Experiment:
         self.toolbarFrame.place(relx=0.0, rely=0.0, anchor="nw", width=420)
         self.toolbar = NavigationToolbar2Tk(self.canvas, self.toolbarFrame)
         self.toolbar.configure(bg='#F0F0F0')
+        self.current_clamp_error_weights = None
         self.queue = Queue()  # needed for multi-threading
         self.processes_in_the_queue = 0
         self.after_job_id = None
         self.bootstrap_mode.trace(
-            'w', lambda *args: self.lowerBoxFrame.after_cancel(self.after_job_id) if self.after_job_id else None)
-        self.current_clamp_error_weights = None
+            'w', lambda *args: (
+                self.lowerBoxFrame.after_cancel(self.after_job_id) if self.after_job_id else None,
+                self.do_when_optimization_ends(None, None) if self.processes_in_the_queue == 0 else None))
 
     def destroy(self, e=None):
         if e:
@@ -512,7 +514,7 @@ class Experiment:
                         child.configure(state='disabled') if child.winfo_class() != 'Entry' \
                             else child.configure(state='readonly')
 
-    def enable_widgets(self):
+    def enable_widgets(self, enableSave=True):
         self.optimizeButton.configure(state='normal')
         for frame in self.experimentFrame.winfo_children():  # enable button if optimization had results
             if frame.winfo_class() == 'Toplevel':
@@ -588,7 +590,7 @@ class Experiment:
             self.optimize()
 
     def handle_results(self, results, corrected_signal, optimization_time):
-        global ring_bell_when_optimization_ends, bootstrap_max_iteration
+        global bootstrap_max_iteration, ring_bell_when_optimization_ends
         keys = Experiment.KEYS[4:]
         # oder maters here since in results.x[-2] is Rin and results.x[-1] is Cm
         if self.parameterMayNeedOptimization['Rin'].get():
@@ -599,26 +601,31 @@ class Experiment:
             self.parameters[key] = result
             self.entries[key].set(round(result, Experiment.DECIMAL_POINTS))
         self.error.set(round(results.fun, Experiment.DECIMAL_POINTS))
-        self.optimization_time.set('Optimized in %.1fs' % optimization_time)
+        self.optimization_time.set('%.1f sec' % optimization_time)
         if (self.bootstrap_counter.get() - self.processes_in_the_queue + 1) < bootstrap_max_iteration.get() and \
             (self.processes_in_the_queue > 1 or self.bootstrap_mode.get()):
             self.save()
         else:
-            # enable GUI widgets
-            self.enable_widgets()
-            self.toggle_entries()
-            self.bootstrap_counter.set(0)
-            self.after_job_id = None
+            self.do_when_optimization_ends(results, corrected_signal)
+            if ring_bell_when_optimization_ends.get():
+                self.experimentFrame.bell()
+
+    def do_when_optimization_ends(self, results, corrected_signal):
+        self.enable_widgets()  # enable GUI widgets
+        self.toggle_entries()
+        self.bootstrap_counter.set(0)
+        self.after_job_id = None
+        if results:
             fake_high_res_t_data = sorted([float(x) for x in range(int(self.get_t_data()[-1]))] + self.get_t_data())
             fake_high_res_data = [[t, 0] for t in fake_high_res_t_data]
             model = self.run_model(set_error=False)  # model should run after setting the entries
-            model.set_data(fake_high_res_data, [1.0]*len(fake_high_res_data))
+            model.set_data(fake_high_res_data, [1.0] * len(fake_high_res_data))
             model.simulate(results.x)
             self.plot(self.plotModel, [row[0] for row in fake_high_res_data], model.simulatedSignal)
-            if ring_bell_when_optimization_ends.get():
-                self.experimentFrame.bell()
-            if corrected_signal:
-                self.plot(self.plotCorrectedSignal, self.get_t_data(), corrected_signal)
+        else:
+            self.buttonSave.config(state='disabled')
+        if corrected_signal:
+            self.plot(self.plotCorrectedSignal, self.get_t_data(), corrected_signal)
 
     def correct_data(self):
         times = self.plotCorrectedSignal.get_xdata()
