@@ -309,7 +309,7 @@ class Experiment:
         self.parameters = Experiment.set_initial_parameters_values(file_name)
 
         self.experimentFrame = Frame(parent)
-        self.experimentFrame.grid(row=Experiment.rowCount, column=0, sticky='NESW')
+        self.experimentFrame.grid(row=Experiment.rowCount, column=0, sticky='NEWS')
         self.experimentFrame.columnconfigure(0, weight=1)
 
         self.topButtonFrame = Frame(self.experimentFrame)
@@ -1438,18 +1438,19 @@ class Main(ScrollableFrame):
     def options(self):
         window = Toplevel(self)
         window.grab_set()  # make the main window unclickable until closing the settings window
+        window.columnconfigure(1, weight=1)
         Label(window, text='Process numbers:').grid(
             row=0, column=0, sticky="W")
         Scale(window, from_=1, to=cpu_count(), variable=process_numbers, orient='horizontal').grid(
-            row=0, column=1, sticky="W")
+            row=0, column=1, sticky="WE")
         Label(window, text='Optimizer population size:').grid(
             row=1, column=0, sticky="W")
         Scale(window, from_=15, to=150, variable=population_size, orient='horizontal').grid(
-            row=1, column=1, sticky="W")
+            row=1, column=1, sticky="WE")
         Label(window, text='Bootstrap max iteration').grid(
             row=2, column=0, sticky="W")
         Scale(window, from_=2, to=100, variable=bootstrap_max_iteration, orient='horizontal').grid(
-            row=2, column=1, sticky="W")
+            row=2, column=1, sticky="WE")
         Label(window, text='Enable bell sound:').grid(
             row=3, column=0, sticky="W")
         Checkbutton(window, variable=ring_bell_when_optimization_ends).grid(
