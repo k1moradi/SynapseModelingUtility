@@ -88,7 +88,7 @@ class Experiment:
         parameters['U_min'] = 0.001
 
         parameters['Rin_max'] = 800.0
-        parameters['Cm_max'] = 1000.0
+        parameters['Cm_max'] = 1200.0
         parameters['g_syn_max'] = 30.0
         parameters['tau_d_max'] = 40.0
         parameters['tau_f_max'] = 30000.0
@@ -154,20 +154,23 @@ class Experiment:
                 corrected_data.insert(1, [t1, interpolator(t1)])
                 error_weight__.insert(1, interpolated_weight)
             if len(data_list) > 2 and len(y) > 1:
-                t3 = (data_list[2][0] + 7.0 * data_list[1][0]) / 8.0
+                t3 = (data_list[2][0] + 15.0 * data_list[1][0]) / 16.0
                 corrected_data.insert(3, [t3, interpolator(t3)])
                 error_weight__.insert(3, interpolated_weight)
-                t4 = (data_list[2][0] + 3.0 * data_list[1][0]) / 4.0
+                t4 = (data_list[2][0] + 7.0 * data_list[1][0]) / 8.0
                 corrected_data.insert(4, [t4, interpolator(t4)])
                 error_weight__.insert(4, interpolated_weight)
-                t5 = (data_list[2][0] + data_list[1][0]) / 2
+                t5 = (data_list[2][0] + 3.0 * data_list[1][0]) / 4.0
                 corrected_data.insert(5, [t5, interpolator(t5)])
                 error_weight__.insert(5, interpolated_weight)
+                t6 = (data_list[2][0] + data_list[1][0]) / 2
+                corrected_data.insert(6, [t6, interpolator(t6)])
+                error_weight__.insert(6, interpolated_weight)
             if len(data_list) > 3 and len(y) > 1:
-                t7 = (data_list[3][0] + data_list[2][0]) / 2.0
-                corrected_data.insert(7, [t7, interpolator(t7)] if (data_list[3][0] - data_list[2][0]) < 100 else
+                t8 = (data_list[3][0] + data_list[2][0]) / 2.0
+                corrected_data.insert(8, [t8, interpolator(t8)] if (data_list[3][0] - data_list[2][0]) < 100 else
                                          [data_list[2][0]+100, data_list[3][1]])
-                error_weight__.insert(7, interpolated_weight)
+                error_weight__.insert(8, interpolated_weight)
                 del corrected_data[-1], error_weight__[-1]
             output += corrected_data
             weight += error_weight__
