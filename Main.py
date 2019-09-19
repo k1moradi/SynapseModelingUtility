@@ -324,6 +324,7 @@ class Experiment:
         self.optimizeButton.grid(row=0, column=0)
         self.bootstrap_mode = BooleanVar()
         Checkbutton(self.optimizeFrame, variable=self.bootstrap_mode).grid(row=0, column=1)
+        self.bootstrap_mode.trace('w', self.bootstrap_mode_trace)
         self.optimizeFrame.grid(
             row=0, column=1)
         self.buttonCorrect = Button(
@@ -421,10 +422,14 @@ class Experiment:
         self.queue = Queue()  # needed for multi-threading
         self.processes_in_the_queue = 0
         self.after_job_id = None
-        self.bootstrap_mode.trace(
-            'w', lambda *args: (
-                self.lowerBoxFrame.after_cancel(self.after_job_id) if self.after_job_id else None,
-                self.do_when_optimization_ends(None, None) if self.processes_in_the_queue == 0 else None))
+
+    def bootstrap_mode_trace(self, *args):
+        if self.bootstrap_mode.get():
+            if self.processes_in_the_queue > 0:
+                self.after_job_id = self.lowerBoxFrame.after(2000, self.optimize)
+        else:
+            self.lowerBoxFrame.after_cancel(self.after_job_id) if self.after_job_id else None
+            self.do_when_optimization_ends(None, None) if self.processes_in_the_queue == 0 else None
 
     def destroy(self, e=None):
         if e:
@@ -517,7 +522,7 @@ class Experiment:
                         child.configure(state='disabled') if child.winfo_class() != 'Entry' \
                             else child.configure(state='readonly')
 
-    def enable_widgets(self, enableSave=True):
+    def enable_widgets(self):
         self.optimizeButton.configure(state='normal')
         for frame in self.experimentFrame.winfo_children():  # enable button if optimization had results
             if frame.winfo_class() == 'Toplevel':
@@ -669,7 +674,7 @@ class Experiment:
     def plot_saved_results(self):
         data = self.get_ty_data()
         init_times = self.get_init_times()
-        peak_idx, second_event_start_index = (2, 8) if self.parameters['Mode'] == 'current-clamp' else (1, 3)
+        peak_idx, second_event_start_index = (2, 9) if self.parameters['Mode'] == 'current-clamp' else (1, 3)
         (t0, y0), (t_peak, y_peak) = data[0], data[peak_idx]
         amplitude, ppr,  isi = y_peak-y0, None, None
         if len(data) > (second_event_start_index + peak_idx) and amplitude != 0.0 and len(init_times) > 1:
@@ -867,7 +872,7 @@ class ExperimentCurrentClamp:
     @staticmethod
     @jit(nopython=True, fastmath=True, cache=True, parallel=False)
     def cell(v, t, g, tau_d, g_leak, e_leak, e_syn):
-        return g_leak * (e_leak - v) + g * exp(-t / tau_d) * (e_syn - v)
+        return g_leak * (e_leak - v) + g * exp(-t / tau_d) * (e_syn - v) # + 1.76/46.83 * exp(-t / 37.8945) * (-80.12 - v)
 
     @staticmethod
     @jit(nopython=True, fastmath=True, cache=True, parallel=False)
