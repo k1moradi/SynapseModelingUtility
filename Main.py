@@ -232,7 +232,7 @@ class Experiment:
         if ppr:
             keys_colors += [('2/1PPR', 'green'), ('ISI', 'green'), ('ST-P', 'green')]
         if recording_mode == "current-clamp":
-            keys_colors += [('Cm', 'brown'), ('Rin', 'brown')]
+            keys_colors += [('Rin', 'brown'), ('Cm', 'brown')]
         for row, (key, color) in enumerate(keys_colors, start=1):
             Label(window, text=key+':', font=font, anchor="e").grid(row=row, column=0, sticky="NEWS")
             entries[key] = EntryWithPlaceholder(master=window, color=color, state='readonly', width=width, font=font)
