@@ -423,14 +423,6 @@ class Experiment:
         self.processes_in_the_queue = 0
         self.after_job_id = None
 
-    def bootstrap_mode_trace(self, *args):
-        if self.bootstrap_mode.get():
-            if self.processes_in_the_queue > 0:
-                self.after_job_id = self.lowerBoxFrame.after(2000, self.optimize)
-        else:
-            self.lowerBoxFrame.after_cancel(self.after_job_id) if self.after_job_id else None
-            self.do_when_optimization_ends(None, None) if self.processes_in_the_queue == 0 else None
-
     def destroy(self, e=None):
         if e:
             messagebox.showerror(
@@ -596,6 +588,15 @@ class Experiment:
             return 0
         if self.bootstrap_mode.get() and self.bootstrap_counter.get() < bootstrap_max_iteration.get():
             self.optimize()
+
+    def bootstrap_mode_trace(self, *args):
+        global bootstrap_max_iteration
+        if self.bootstrap_mode.get():
+            if self.processes_in_the_queue > 0 and self.bootstrap_counter.get() < bootstrap_max_iteration.get():
+                self.after_job_id = self.lowerBoxFrame.after(2000, self.optimize)
+        else:
+            self.lowerBoxFrame.after_cancel(self.after_job_id) if self.after_job_id else None
+            self.do_when_optimization_ends(None, None) if self.processes_in_the_queue == 0 else None
 
     def handle_results(self, results, corrected_signal, optimization_time):
         global bootstrap_max_iteration, ring_bell_when_optimization_ends
@@ -1610,6 +1611,7 @@ class Main(ScrollableFrame):
             self.update_scrollbar()
 
     def close_all(self, assume_yes=False, event=None):
+        global running_processes
         if assume_yes or messagebox.askokcancel('Close all', 'Do you want to close the all the experiments?'):
             while len(self.experiments) > 0:
                 self.experiments[-1].destroy()
@@ -1617,6 +1619,7 @@ class Main(ScrollableFrame):
             self.update_scrollbar()
             if Experiment.summary_window:
                 Experiment.summary_window.destroy()
+            running_processes = 0
 
     def on_exit(self):
         if not self.experiments or messagebox.askyesno("Exit", "Do you want to quit the application?"):
