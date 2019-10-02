@@ -1348,9 +1348,10 @@ class Main(ScrollableFrame):
                 tau = (t_decay - t_rise) / (log(fabs(a_rise)) - log(fabs(a_decay)))
                 df.loc[3] = [2.0 * t_decay - t_rise, a_rise * exp(-2.0*(t_decay - t_rise) / tau)]
 
-                if isi:
+                if isi and isi > t_rise:
                     j = 1.0
                     while t_decay >= isi or (t_decay - t_rise) > tau:
+                        print('1st loop', t_decay, t_rise, isi, t_decay - t_rise, tau)
                         j += 0.05
                         t_decay = t_rise + (isi - t_rise) / j
                         df.loc[2] = [t_decay, a_rise * exp(-(t_decay - t_rise) / tau)]
@@ -1394,6 +1395,7 @@ class Main(ScrollableFrame):
                         j += 1.0
                         t_decay = df.loc[peak_idx].time + ((i + 1.0) * isi - df.loc[peak_idx].time) / j
                         while t_decay >= (i + 1.0) * isi or (t_decay - df.loc[peak_idx].time) > tau:
+                            print('2nd loop', t_decay, (i + 1.0) * isi, t_decay - df.loc[peak_idx].time, tau)
                             j += 0.05
                             t_decay = df.loc[peak_idx].time + ((i + 1.0) * isi - df.loc[peak_idx].time) / j
                         df.loc[start_idx+2] = [
@@ -1402,6 +1404,8 @@ class Main(ScrollableFrame):
                         df.loc[start_idx+3] = [
                             (i+1.0) * isi,
                             df.loc[peak_idx].signal * exp(-(isi - t_rise) / tau) if ppr else None]
+                elif isi and isi <= t_rise:
+                    messagebox.showwarning('warning', 'inter-event-interval should be larger than rise time')
                 df.time = df.time + 60000 * idx
                 if idx > 0:
                     all_dfs = all_dfs[:-1]
@@ -1448,6 +1452,7 @@ class Main(ScrollableFrame):
         window = Toplevel(self)
         window.grab_set()  # make the main window unclickable until closing the settings window
         window.columnconfigure(1, weight=1)
+        window.geometry('{}x{}'.format(512, 210))
         Label(window, text='Process numbers:').grid(
             row=0, column=0, sticky="W")
         Scale(window, from_=1, to=cpu_count(), variable=process_numbers, orient='horizontal').grid(
