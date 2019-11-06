@@ -16,11 +16,13 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure, rcParams
 import matplotlib.pyplot as plt
 from pandas import DataFrame, read_csv, read_json
-from my_scatter_matrix import scatter_matrix
+# from my_scatter_matrix import scatter_matrix
+from pandas.plotting import scatter_matrix
 from math import exp, fabs, isnan, log
 from scipy.integrate import odeint
 from scipy.optimize import differential_evolution
-from scipy.interpolate import PchipInterpolator  # The cubic Hermite interpolation mmas.github.io/interpolation-scipy
+from scipy.interpolate import PchipInterpolator  # cubic Hermite interpolator mmas.github.io/interpolation-scipy
+from scipy.interpolate import Akima1DInterpolator # Akima interpolator
 from re import match, findall, split, search
 from time import time, sleep
 from numba import jit
@@ -151,7 +153,10 @@ class Experiment:
             if len(data_list) > 1 and len(y) > 1:
                 t1 = (data_list[1][0] + data_list[0][0]) / 2
                 interpolator = PchipInterpolator(t, y)
-                corrected_data.insert(1, [t1, interpolator(t1)])
+                akima_interpolator = Akima1DInterpolator(t, y)
+                y1_akima, y1_pchip = akima_interpolator(t1), interpolator(t1)
+                y1_amplitude = fabs(data_list[0][0] - data_list[0][0])
+                corrected_data.insert(1, [t1, y1_akima if fabs(y1_akima - data_list[0][0])<y1_amplitude else y1_pchip])
                 error_weight__.insert(1, interpolated_weight)
             if len(data_list) > 2 and len(y) > 1:
                 t3 = (data_list[2][0] + 15.0 * data_list[1][0]) / 16.0
@@ -283,8 +288,8 @@ class Experiment:
                 if show_matrix_plot.get():
                     scatter_matrix(df, alpha=0.5, figsize=(12, 9), diagonal='kde', grid=True)
                     plt.get_current_fig_manager().window.showMaximized()
-                    plt.annotate(annotation, xy=(0.365, 0.67), xycoords='figure fraction',
-                                 size=24 if window.master.winfo_screenwidth() > 1280 else 16)
+                    # plt.annotate(annotation, xy=(0.365, 0.67), xycoords='figure fraction',
+                    #              size=24 if window.master.winfo_screenwidth() > 1280 else 16)
                     plt.show(block=False)
             except FileNotFoundError or PermissionError or TimeoutError:
                 console_print += '  Optimization results available yet to be summarized!\n'
@@ -1452,7 +1457,7 @@ class Main(ScrollableFrame):
         window = Toplevel(self)
         window.grab_set()  # make the main window unclickable until closing the settings window
         window.columnconfigure(1, weight=1)
-        window.geometry('{}x{}'.format(512, 210))
+        window.geometry('{}x{}'.format(512, 250))
         Label(window, text='Process numbers:').grid(
             row=0, column=0, sticky="W")
         Scale(window, from_=1, to=cpu_count(), variable=process_numbers, orient='horizontal').grid(
