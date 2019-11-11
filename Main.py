@@ -102,10 +102,11 @@ class Experiment:
 
         json_file = path.join(Experiment.WORKING_DIRECTORY, Experiment.JSONs_FOLDER, file_name + '.json')
         if path.isfile(json_file):
-            loaded_parameters = Experiment.get_json_file_as_dict_list(json_file)[0]
+            best_earlier_optimization = Experiment.get_json_file_as_data_frame(json_file).sort_values(by=['error'])\
+                .to_dict(orient='records')[0]
             for key in parameters:
-                if key in loaded_parameters:
-                    parameters[key] = loaded_parameters[key]
+                if key in best_earlier_optimization:
+                    parameters[key] = best_earlier_optimization[key]
 
         return parameters
 
@@ -352,7 +353,7 @@ class Experiment:
         self.experimentModeChoice.trace('w', self.mode_change)
         OptionMenu(self.lowerBoxFrame, self.experimentModeChoice, *{'voltage-clamp', 'current-clamp'}).grid(
             row=0, column=1, columnspan=2, sticky='WENS')
-        Button(self.lowerBoxFrame, text="delete file", command=self.delete_file).grid(row=0, column=3, sticky="NEWS")
+        Button(self.lowerBoxFrame, text="delete json file", command=self.delete_file).grid(row=0, column=3, sticky="NEWS")
         self.entries = dict()
         self.checkButton = dict()
         self.parameterMayNeedOptimization = dict()
@@ -669,7 +670,7 @@ class Experiment:
         model_info['isCmOptimized'] = [self.parameterMayNeedOptimization['Cm'].get()]
         model_info['isRinOptimized'] = [self.parameterMayNeedOptimization['Rin'].get()]
         current_data = DataFrame.from_dict(model_info)
-        json_file = Experiment.WORKING_DIRECTORY + '/jsons/' + self.FILE_NAME + ".json"
+        json_file = path.join(Experiment.WORKING_DIRECTORY, 'jsons', self.FILE_NAME + '.json')
         if path.isfile(json_file):
             current_data = current_data.append(
                 DataFrame.from_dict(Experiment.get_json_file_as_dict_list(json_file)),
