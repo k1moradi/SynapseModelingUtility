@@ -236,7 +236,7 @@ class Experiment:
                        ('g_syn', 'blue'), ('tau_d', 'blue'), ('tau_r', 'blue'), ('tau_f', 'blue'), ('U', 'blue'),
                        ('Peak', 'green')]
         if ppr:
-            keys_colors += [('2/1PPR', 'green'), ('ISI', 'green'), ('ST-P', 'green')]
+            keys_colors += [('ISI', 'green'), ('ST-P', 'green'), ('2/1PPR', 'green')]
         if recording_mode == "current-clamp":
             keys_colors += [('Rin', 'brown'), ('Cm', 'brown')]
         for row, (key, color) in enumerate(keys_colors, start=1):
@@ -575,6 +575,7 @@ class Experiment:
     def optimize(self):
         self.disable_widgets()
         global process_numbers, running_processes, population_size, print_results_when_optimization_ends
+        global bootstrap_max_iteration
         if (process_numbers.get() - running_processes) > 0:
             model = self.run_model(set_error=False)
             MultiProcessOptimization(
