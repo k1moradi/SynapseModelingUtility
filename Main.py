@@ -1305,9 +1305,10 @@ class Main(ScrollableFrame):
         types, entries, row = dict(), dict(), 0
         row_values = [
             {'type': 'Rise', 'title': 'time', 'unit': 'ms',
-             'options': {'10-90%', '0-100%', '20-80%', 'time constant', 'unspecified'}},
+             'options': {'10-90%', '0-100%', '20-80%', 'time constant', 'unspecified'}, 'default': '10-90%'},
             {'type': 'Decay', 'title': 'time', 'unit': 'ms', 'options':
-                {'100-0%', '100-37%', '100-50%', '100-63%', '90-37%', 'time constant', '50-50%', 'unspecified'}},
+                {'100-0%', '100-37%', '100-50%', '100-63%', '90-37%', 'time constant', '50-50%', 'unspecified'},
+                'default': 'time constant'},
             {'type': 'Signal', 'title': 'potency', 'unit': 'mV or pA', 'options': None},
             {'type': 'ISI', 'title': 'time', 'unit': 'ms', 'options': None},
             {'type': 'PPR', 'title': '2/1 amplitude', 'unit': 'ratio', 'options': None},
@@ -1318,7 +1319,9 @@ class Main(ScrollableFrame):
             {'type': '7PPR', 'title': '7/1 amplitude', 'unit': 'ratio', 'options': None},
             {'type': '8PPR', 'title': '8/1 amplitude', 'unit': 'ratio', 'options': None},
             {'type': '9PPR', 'title': '9/1 amplitude', 'unit': 'ratio', 'options': None},
-            {'type': '10PPR', 'title': '10/1 amplitude', 'unit': 'ratio', 'options': None}
+            {'type': '10PPR', 'title': '10/1 amplitude', 'unit': 'ratio', 'options': None},
+            {'type': 'tau_r', 'title': 'recovery time constant', 'unit': 'ms', 'options': {'No', 'Yes'}, 
+             'default': 'No'}
         ]
         ppr_indices = ['PPR', '3PPR', '4PPR', '5PPR', '6PPR', '7PPR', '8PPR', '9PPR', '10PPR']
         for row, value in enumerate(row_values):
@@ -1326,13 +1329,14 @@ class Main(ScrollableFrame):
                 master=window,
                 placeholder='%s %s value (%s)' % (value['type'], value['title'], value['unit']),
                 font=('Courier New', 16),
-                width=35
+                width=40
             )
             entries[value['type']].grid(row=row, column=0, sticky='NEWS')
             if value['options']:
                 types[value['type']] = StringVar(window)
                 types[value['type']].set(next(iter(value['options'])))
                 OptionMenu(window, types[value['type']], *value['options']).grid(row=row, column=1, sticky='NEWS')
+                types[value['type']].set(value['default'])
 
         def make_save_pseudo_trace():
             all_dfs = DataFrame({'time': [], 'signal': []})
@@ -1402,7 +1406,7 @@ class Main(ScrollableFrame):
                         j += 1.0
                         t_decay = df.loc[peak_idx].time + ((i + 1.0) * isi - df.loc[peak_idx].time) / j
                         while t_decay >= (i + 1.0) * isi or (t_decay - df.loc[peak_idx].time) > tau:
-                            print('2nd loop', t_decay, (i + 1.0) * isi, t_decay - df.loc[peak_idx].time, tau)
+                            # print('2nd loop', t_decay, (i + 1.0) * isi, t_decay - df.loc[peak_idx].time, tau)
                             j += 0.05
                             t_decay = df.loc[peak_idx].time + ((i + 1.0) * isi - df.loc[peak_idx].time) / j
                         df.loc[start_idx+2] = [
@@ -1413,9 +1417,19 @@ class Main(ScrollableFrame):
                             df.loc[peak_idx].signal * exp(-(isi - t_rise) / tau) if ppr else None]
                 elif isi and isi <= t_rise:
                     messagebox.showwarning('warning', 'inter-event-interval should be larger than rise time')
-                df.time = df.time + 60000 * idx
+                df.time += 60000 * idx
                 if idx > 0:
                     all_dfs = all_dfs[:-1]
+                all_dfs = all_dfs.append(df)
+            # Recovery
+            if isi and ppr_as[1] < 1 and types['tau_r'].get() == 'Yes':
+                tau_r_str = entries['tau_r'].get_()
+                all_dfs = all_dfs[:-1]
+                df = all_dfs[-3:].copy()
+                a_last_signal = df.iloc[-2].signal - df.iloc[-3].signal
+                df.time += float(tau_r_str) if tau_r_str else 2000.0
+                df.iloc[-2].signal = df.iloc[-3].signal + a_last_signal + (a_rise - a_last_signal) * 0.63
+                df.iloc[-1].signal = df.iloc[-2].signal * exp(-(df.iloc[-1].time - df.iloc[-2].time) / tau)
                 all_dfs = all_dfs.append(df)
             f = filedialog.asksaveasfile(defaultextension=".csv")
             if f is None:  # asksaveasfile return `None` if dialog closed with "cancel".
@@ -1451,9 +1465,11 @@ class Main(ScrollableFrame):
                                                      Experiment.DECIMAL_POINTS))
             window.lift()
 
-        Button(window, command=get_data_from_csv, text='Read CSV').grid(row=row - 2, column=1, sticky='NEWS')
-        Button(window, command=clear_fields, text='Clear').grid(row=row-1, column=1, sticky='NEWS')
-        Button(window, command=make_save_pseudo_trace, text='Save CSV').grid(row=row, column=1, sticky='NEWS')
+        b_frame = Frame(window)
+        Button(b_frame, command=get_data_from_csv, text='Read CSV', width=25).grid(row=0, column=0, sticky='NEWS')
+        Button(b_frame, command=clear_fields, text='Clear', width=25).grid(row=0, column=1, sticky='NEWS')
+        Button(b_frame, command=make_save_pseudo_trace, text='Save CSV', width=25).grid(row=0, column=2, sticky='NEWS')
+        b_frame.grid(row=row+1, column=0, sticky='NEWS')
 
     def options(self):
         window = Toplevel(self)
