@@ -1320,7 +1320,7 @@ class Main(ScrollableFrame):
             {'type': '8PPR', 'title': '8/1 amplitude', 'unit': 'ratio', 'options': None},
             {'type': '9PPR', 'title': '9/1 amplitude', 'unit': 'ratio', 'options': None},
             {'type': '10PPR', 'title': '10/1 amplitude', 'unit': 'ratio', 'options': None},
-            {'type': 'tau_r', 'title': 'recovery time constant', 'unit': 'ms', 'options': {'No', 'Yes'}, 
+            {'type': 'tau_r', 'title': 'recovery time constant', 'unit': 'ms', 'options': {'No', 'Yes'},
              'default': 'No'}
         ]
         ppr_indices = ['PPR', '3PPR', '4PPR', '5PPR', '6PPR', '7PPR', '8PPR', '9PPR', '10PPR']
@@ -1427,7 +1427,9 @@ class Main(ScrollableFrame):
                 all_dfs = all_dfs[:-1]
                 df = all_dfs[-3:].copy()
                 a_last_signal = df.iloc[-2].signal - df.iloc[-3].signal
+                t_last_signal = df.iloc[-2].time
                 df.time += float(tau_r_str) if tau_r_str else 2000.0
+                df.iloc[-3].signal = a_last_signal * exp(-(df.iloc[-3].time - t_last_signal) / tau)
                 df.iloc[-2].signal = df.iloc[-3].signal + a_last_signal + (a_rise - a_last_signal) * 0.63
                 df.iloc[-1].signal = df.iloc[-2].signal * exp(-(df.iloc[-1].time - df.iloc[-2].time) / tau)
                 all_dfs = all_dfs.append(df)
