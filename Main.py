@@ -16,11 +16,10 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure, rcParams
 import matplotlib.pyplot as plt
 from pandas import DataFrame, read_csv, read_json
-# from my_scatter_matrix import scatter_matrix
 from pandas.plotting import scatter_matrix
 from math import exp, fabs, isnan, log
 from scipy.integrate import odeint
-from scipy.optimize import differential_evolution
+from scipy.optimize import differential_evolution, curve_fit
 from scipy.interpolate import PchipInterpolator  # cubic Hermite interpolator mmas.github.io/interpolation-scipy
 from scipy.interpolate import Akima1DInterpolator # Akima interpolator
 from re import match, findall, split, search
@@ -1186,6 +1185,10 @@ class Main(ScrollableFrame):
         for i in range(0, len(l), n):
             yield l[i:i + n]
 
+    @staticmethod
+    def single_exponential_f(t, tau):
+        return np.exp(-t / tau)
+
     def __init__(self, *args, **kwargs):
         Experiment.CSVs_FOLDER = Main.CSVs_FOLDER
         # make a scrollable Frame
@@ -1376,18 +1379,23 @@ class Main(ScrollableFrame):
                                 ppr_ts += [float(i * isi)]
                             except ValueError or TypeError:
                                 pass
-                    if len(ppr_as) > 2:
-                        interpolator = PchipInterpolator(ppr_ts, ppr_as, extrapolate=True)
-                        print('using cubic Hermite interpolator for PPRs')
-                    elif len(ppr_as) == 2 and ppr_as[1] < 1:
+                    if sorted(ppr_as, reverse=True) == ppr_as:
+                        ppr_tau = curve_fit(Main.single_exponential_f, ppr_ts, ppr_as, 0.5)[0][0]
+                        # ppr_tau_ = (ppr_ts[1] - ppr_ts[0]) / (log(fabs(ppr_as[0])) - log(fabs(ppr_as[1])))
+
                         def interpolator(t):
-                            ppr_tau = (ppr_ts[1] - ppr_ts[0]) / (log(fabs(ppr_as[0])) - log(fabs(ppr_as[1])))
+                            nonlocal ppr_tau
                             return ppr_as[0] * exp(-(t - ppr_ts[0]) / ppr_tau)
                         print('using single exponential interpolator for PPRs')
-                    elif len(ppr_as) == 2 and ppr_as[1] >= 1:
+                    elif len(ppr_as) > 1:
                         ppr_ts += [20 * isi]
                         ppr_as += [1.0]
-                        interpolator = PchipInterpolator(ppr_ts, ppr_as)
+                        interpolator = PchipInterpolator(ppr_ts, ppr_as) # , extrapolate=True
+                        print('using cubic Hermite interpolator for PPRs')
+                    # elif len(ppr_as) == 2 and ppr_as[1] >= 1:
+                    #     ppr_ts += [20 * isi]
+                    #     ppr_as += [1.0]
+                    #     interpolator = PchipInterpolator(ppr_ts, ppr_as)
                     else:
                         interpolator = None
 
@@ -1620,16 +1628,12 @@ class Main(ScrollableFrame):
         double_exponential_frame.grid_columnconfigure(4, weight=1)
 
         def double_exponential_decay(tau1, tau2, a1_ratio):
-            from scipy.optimize import curve_fit
             t = np.arange(100.0, step=0.1)
             a2_ratio = 1-a1_ratio
             double_exp_f = a1_ratio * np.exp(-t / tau1) + a2_ratio * np.exp(-t / tau2)
-
-            def single_exponential_f(t, tau):
-                return np.exp(-t/tau)
-            tau = curve_fit(single_exponential_f, t, double_exp_f, 0.5)[0][0]
+            tau = curve_fit(Main.single_exponential_f, t, double_exp_f, 0.5)[0][0]
             plt.plot(t, double_exp_f, 'ro', label='double exp')
-            plt.plot(t, single_exponential_f(t, tau), 'bo', label='single exp')
+            plt.plot(t, Main.single_exponential_f(t, tau), 'bo', label='single exp')
             plt.legend()
             plt.show(block=False)
             return tau
