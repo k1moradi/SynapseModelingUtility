@@ -21,7 +21,7 @@ from math import exp, fabs, isnan, log
 from scipy.integrate import odeint
 from scipy.optimize import differential_evolution, curve_fit
 from scipy.interpolate import PchipInterpolator  # cubic Hermite interpolator mmas.github.io/interpolation-scipy
-from scipy.interpolate import Akima1DInterpolator # Akima interpolator
+from scipy.interpolate import Akima1DInterpolator  # Akima interpolator
 from re import match, findall, split, search
 from time import time, sleep
 from numba import jit
@@ -1324,7 +1324,7 @@ class Main(ScrollableFrame):
             {'type': '9PPR', 'title': '9/1 amplitude', 'unit': 'ratio', 'options': None},
             {'type': '10PPR', 'title': '10/1 amplitude', 'unit': 'ratio', 'options': None},
             {'type': 'tau_r', 'title': 'recovery time constant', 'unit': 'ms', 'options': {'No', 'Yes'},
-             'default': 'No'}
+             'default': 'Yes'}
         ]
         ppr_indices = ['PPR', '3PPR', '4PPR', '5PPR', '6PPR', '7PPR', '8PPR', '9PPR', '10PPR']
         for row, value in enumerate(row_values):
@@ -1380,8 +1380,12 @@ class Main(ScrollableFrame):
                             except ValueError or TypeError:
                                 pass
                     if sorted(ppr_as, reverse=True) == ppr_as:
-                        ppr_tau = curve_fit(Main.single_exponential_f, ppr_ts, ppr_as, 0.5)[0][0]
-                        # ppr_tau_ = (ppr_ts[1] - ppr_ts[0]) / (log(fabs(ppr_as[0])) - log(fabs(ppr_as[1])))
+                        ppr_tau_initial_guess = (ppr_ts[-1]-ppr_ts[0]) / (log(fabs(ppr_as[0])) - log(fabs(ppr_as[-1])))
+                        ppr_ts_high_res = np.arange(ppr_ts[-1]+1, dtype=float)
+                        ppr_as_high_res = PchipInterpolator(ppr_ts, ppr_as)(ppr_ts_high_res)
+                        ppr_tau = curve_fit(Main.single_exponential_f, ppr_ts_high_res, ppr_as_high_res,
+                                            p0=ppr_tau_initial_guess)[0][0]
+                        ppr_tau = ppr_tau if ppr_tau > ppr_tau_initial_guess else ppr_tau_initial_guess
 
                         def interpolator(t):
                             nonlocal ppr_tau
@@ -1389,8 +1393,8 @@ class Main(ScrollableFrame):
                         print('using single exponential interpolator for PPRs')
                     elif len(ppr_as) > 1:
                         ppr_ts += [20 * isi]
-                        ppr_as += [1.0]
-                        interpolator = PchipInterpolator(ppr_ts, ppr_as) # , extrapolate=True
+                        ppr_as += [sorted(ppr_as)[0]]
+                        interpolator = PchipInterpolator(ppr_ts, ppr_as)  # , extrapolate=True
                         print('using cubic Hermite interpolator for PPRs')
                     # elif len(ppr_as) == 2 and ppr_as[1] >= 1:
                     #     ppr_ts += [20 * isi]
