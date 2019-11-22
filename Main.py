@@ -17,7 +17,7 @@ from matplotlib.figure import Figure, rcParams
 import matplotlib.pyplot as plt
 from pandas import DataFrame, read_csv, read_json
 from pandas.plotting import scatter_matrix
-from math import exp, fabs, isnan, log
+from math import exp, fabs, isnan, log, e
 from scipy.integrate import odeint
 from scipy.optimize import differential_evolution, curve_fit
 from scipy.interpolate import PchipInterpolator  # cubic Hermite interpolator mmas.github.io/interpolation-scipy
@@ -101,12 +101,11 @@ class Experiment:
 
         json_file = path.join(Experiment.WORKING_DIRECTORY, Experiment.JSONs_FOLDER, file_name + '.json')
         if path.isfile(json_file):
-            best_earlier_optimization = Experiment.get_json_file_as_data_frame(json_file).sort_values(by=['error'])\
-                .to_dict(orient='records')[0]
+            best_earlier_optimization = Experiment.get_json_file_as_data_frame(json_file).\
+                sort_values(by=['error']).replace({np.nan: None}).to_dict(orient='records')[0]
             for key in parameters:
-                if key in best_earlier_optimization:
+                if key in best_earlier_optimization and best_earlier_optimization[key]:
                     parameters[key] = best_earlier_optimization[key]
-
         return parameters
 
     @staticmethod
@@ -377,6 +376,7 @@ class Experiment:
                 self.entries[key].grid(row=row, column=1, columnspan=3, sticky='WENS')
             if key in Experiment.MAY_NEED_OPTIMIZATION:
                 self.parameterMayNeedOptimization[key] = BooleanVar()
+                print(key, self.parameters['is'+key+'Optimized'])
                 self.parameterMayNeedOptimization[key].set(int(self.parameters['is'+key+'Optimized']))
                 self.checkButton[key] = Checkbutton(self.lowerBoxFrame, variable=self.parameterMayNeedOptimization[key])
                 self.checkButton[key].grid(row=row, column=4, sticky='W')
@@ -1313,7 +1313,8 @@ class Main(ScrollableFrame):
                 {'100-0%', '100-37%', '100-50%', '100-63%', '90-37%', 'time constant', '50-50%', 'unspecified'},
                 'default': 'time constant'},
             {'type': 'Signal', 'title': 'potency', 'unit': 'mV or pA', 'options': None},
-            {'type': 'ISI', 'title': 'time', 'unit': 'ms', 'options': None},
+            {'type': 'ISI', 'title': 'time', 'unit': 'ms',
+             'options': {'Exponential Interpolation', 'Cubic Interpolation'}, 'default': 'Exponential Interpolation'},
             {'type': 'PPR', 'title': '2/1 amplitude', 'unit': 'ratio', 'options': None},
             {'type': '3PPR', 'title': '3/1 amplitude', 'unit': 'ratio', 'options': None},
             {'type': '4PPR', 'title': '4/1 amplitude', 'unit': 'ratio', 'options': None},
@@ -1348,15 +1349,16 @@ class Main(ScrollableFrame):
             for idx, isi in enumerate(inter_stimulus_intervals, start=0):
                 df = DataFrame({'time': [0], 'signal': [0]})
                 rise_conversion_factor = {
-                    '10-90%': 0.8, '0-100%': 1.0, '20-80%': 0.6, 'time constant': 0.632, 'unspecified': 1.0}
+                    '10-90%': 0.8, '0-100%': 1.0, '20-80%': 0.6, 'time constant': 1-1/e, 'unspecified': 1.0}
                 t_rise = float(entries['Rise'].get_()) / rise_conversion_factor.get(types['Rise'].get())
                 a_rise = float(entries['Signal'].get_())
                 df.loc[1] = [t_rise, a_rise]
                 decay_conversion_factor = {
-                    '100-0%': 0.0, '100-37%': 0.37, '100-50%': 0.5, '50-50%': 0.5, '100-63%': 0.63, '90-37%': 0.37,
+                    '100-0%': 0.0, '100-37%': 0.37, '100-50%': 0.5, '50-50%': 0.5, '100-63%': 1-1/e, '90-37%': 0.37,
                     'time constant': 0.37, 'unspecified': 0.0}
                 t_decay = (t_rise if types['Decay'].get() != '50-50%' else t_rise/2
-                           ) + float(entries['Decay'].get_()) * (1 if types['Decay'].get() != '90-37%' else 0.63 / 0.57)
+                           ) + float(entries['Decay'].get_()) * (
+                    1 if types['Decay'].get() != '90-37%' else (1-1/e)/0.57)
                 a_decay = a_rise * decay_conversion_factor.get(types['Decay'].get())
                 df.loc[2] = [t_decay, a_decay]
                 tau = (t_decay - t_rise) / (log(fabs(a_rise)) - log(fabs(a_decay)))
@@ -1379,7 +1381,7 @@ class Main(ScrollableFrame):
                                 ppr_ts += [float(i * isi)]
                             except ValueError or TypeError:
                                 pass
-                    if sorted(ppr_as, reverse=True) == ppr_as:
+                    if sorted(ppr_as, reverse=True) == ppr_as and types['ISI'].get() == 'Exponential Interpolation':
                         ppr_tau_initial_guess = (ppr_ts[-1]-ppr_ts[0]) / (log(fabs(ppr_as[0])) - log(fabs(ppr_as[-1])))
                         ppr_ts_high_res = np.arange(ppr_ts[-1]+1, dtype=float)
                         ppr_as_high_res = PchipInterpolator(ppr_ts, ppr_as)(ppr_ts_high_res)
@@ -1395,11 +1397,8 @@ class Main(ScrollableFrame):
                         ppr_ts += [20 * isi]
                         ppr_as += [sorted(ppr_as)[0]]
                         interpolator = PchipInterpolator(ppr_ts, ppr_as)  # , extrapolate=True
+                        types['ISI'].set('Cubic Interpolation')
                         print('using cubic Hermite interpolator for PPRs')
-                    # elif len(ppr_as) == 2 and ppr_as[1] >= 1:
-                    #     ppr_ts += [20 * isi]
-                    #     ppr_as += [1.0]
-                    #     interpolator = PchipInterpolator(ppr_ts, ppr_as)
                     else:
                         interpolator = None
 
@@ -1442,7 +1441,7 @@ class Main(ScrollableFrame):
                 t_last_signal = df.iloc[-2].time
                 df.time += float(tau_r_str) if tau_r_str else 2000.0
                 df.iloc[-3].signal = a_last_signal * exp(-(df.iloc[-3].time - t_last_signal) / tau)
-                df.iloc[-2].signal = df.iloc[-3].signal + a_last_signal + (a_rise - a_last_signal) * 0.63
+                df.iloc[-2].signal = df.iloc[-3].signal + a_last_signal + (a_rise - a_last_signal) * (1-1/e)
                 df.iloc[-1].signal = df.iloc[-2].signal * exp(-(df.iloc[-1].time - df.iloc[-2].time) / tau)
                 all_dfs = all_dfs.append(df)
             f = filedialog.asksaveasfile(defaultextension=".csv")
