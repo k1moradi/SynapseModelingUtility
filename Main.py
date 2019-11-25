@@ -376,7 +376,6 @@ class Experiment:
                 self.entries[key].grid(row=row, column=1, columnspan=3, sticky='WENS')
             if key in Experiment.MAY_NEED_OPTIMIZATION:
                 self.parameterMayNeedOptimization[key] = BooleanVar()
-                print(key, self.parameters['is'+key+'Optimized'])
                 self.parameterMayNeedOptimization[key].set(int(self.parameters['is'+key+'Optimized']))
                 self.checkButton[key] = Checkbutton(self.lowerBoxFrame, variable=self.parameterMayNeedOptimization[key])
                 self.checkButton[key].grid(row=row, column=4, sticky='W')
@@ -1189,6 +1188,10 @@ class Main(ScrollableFrame):
     def single_exponential_f(t, tau):
         return np.exp(-t / tau)
 
+    @staticmethod
+    def single_exponential_res(t, tau, residual):
+        return np.exp(-t / tau) + residual
+
     def __init__(self, *args, **kwargs):
         Experiment.CSVs_FOLDER = Main.CSVs_FOLDER
         # make a scrollable Frame
@@ -1385,13 +1388,20 @@ class Main(ScrollableFrame):
                         ppr_tau_initial_guess = (ppr_ts[-1]-ppr_ts[0]) / (log(fabs(ppr_as[0])) - log(fabs(ppr_as[-1])))
                         ppr_ts_high_res = np.arange(ppr_ts[-1]+1, dtype=float)
                         ppr_as_high_res = PchipInterpolator(ppr_ts, ppr_as)(ppr_ts_high_res)
-                        ppr_tau = curve_fit(Main.single_exponential_f, ppr_ts_high_res, ppr_as_high_res,
-                                            p0=ppr_tau_initial_guess)[0][0]
-                        ppr_tau = ppr_tau if ppr_tau > ppr_tau_initial_guess else ppr_tau_initial_guess
+                        ppr_tau, residual = curve_fit(Main.single_exponential_res, ppr_ts_high_res, ppr_as_high_res,
+                                                      p0=(ppr_tau_initial_guess, 0),
+                                                      bounds=((0, 0), (np.inf, np.inf)))[0]
+                        plt.plot(ppr_ts_high_res, ppr_as_high_res, 'ro', label='PPR Data')
+                        plt.plot(ppr_ts_high_res,
+                                 Main.single_exponential_res(ppr_ts_high_res, ppr_tau, residual),
+                                 'bo', label='single exp fit')
+                        plt.legend()
+                        plt.show(block=False)
+                        plt.annotate('ppr=exp(-t/%f)+%f' % (ppr_tau, residual),
+                                     xy=(0.5, 0.9), xycoords='figure fraction')
 
                         def interpolator(t):
-                            nonlocal ppr_tau
-                            return ppr_as[0] * exp(-(t - ppr_ts[0]) / ppr_tau)
+                            return exp(-(t - ppr_ts[0]) / ppr_tau) + residual
                         print('using single exponential interpolator for PPRs')
                     elif len(ppr_as) > 1:
                         ppr_ts += [20 * isi]
