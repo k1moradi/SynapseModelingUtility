@@ -6,7 +6,7 @@ This GUI helps simulate synaptic electrophysiology recordings efficiently. Curre
 ![image](https://user-images.githubusercontent.com/18602635/62956427-ed0e0400-bdc0-11e9-99f7-3a21b997141f.png)
 
 ## Installation
-The program is tested on standard python 3 [anaconda distribution](https://www.anaconda.com/distribution/). If you use anaconda all the dependencies will be taken care of. Then, just copy Main.py and my_scatter_matrix.py files in a folder on your computer, and create two subfolders named "csvs" and "jsons" in it and run the Main.py.
+The program is tested on standard python 3 [anaconda distribution](https://www.anaconda.com/distribution/). If you use anaconda all the dependencies will be taken care of. Then, just copy Main.py file in a folder on your computer, and create two subfolders named "csvs" and "jsons" in it and run the Main.py.
 
 ## Module Dependencies:
 psutil, matplotlib, pandas, math, scipy, numba, numpy, sys, os multiprocessing, queue, tkinter, re, and time.
