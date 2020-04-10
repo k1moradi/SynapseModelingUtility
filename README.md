@@ -21,6 +21,7 @@ psutil, matplotlib, pandas, math, scipy, numba, numpy, sys, os multiprocessing, 
 |numba|0.43.1|
 |numpy|1.16.4|
 |tk|8.6.8|
+|PyQt|5|
 
 
 ## How to use
