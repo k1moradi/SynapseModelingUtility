@@ -15,8 +15,10 @@ from tkinter import Frame, Button, Checkbutton, Label, Entry, OptionMenu, String
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure, rcParams
 import matplotlib.pyplot as plt
-from pandas import DataFrame, read_csv, read_json
+import matplotlib
+from pandas import DataFrame, read_csv, read_json, concat
 from pandas.plotting import scatter_matrix
+from pandas.io.clipboard import copy
 from math import exp, fabs, isnan, log, e
 from scipy.integrate import odeint
 from scipy.optimize import differential_evolution, curve_fit
@@ -26,11 +28,16 @@ from re import match, findall, split, search
 from time import time, sleep
 from numba import jit
 import numpy as np
+
+plt.ion()
+matplotlib.interactive(True)
+matplotlib.use('TkAgg')
 environ['NUMBA_ENABLE_AVX'] = '1'
 rcParams['font.family'] = 'monospace'  # set the font family used in
 setrecursionlimit(6000)
 if platform.startswith("win"):
     from ctypes import windll, c_int, byref
+
     # Query DPI Awareness (Windows 10 and 8)
     awareness = c_int()
     windll.shcore.GetProcessDpiAwareness(0, byref(awareness))
@@ -49,7 +56,7 @@ class Experiment:
     CSVs_FOLDER = 'csvs'
     JSONs_FOLDER = 'jsons'
     KEYS = ['Erev', 'Vm', 'Rin', 'Cm', 'g_syn', 'tau_d', 'tau_r', 'tau_f', 'U']
-    UNITS = ['mV', 'mV', 'M'+u'\u2126', 'pF', 'nS', 'ms', 'ms', 'ms', '']
+    UNITS = ['mV', 'mV', 'M' + u'\u2126', 'pF', 'nS', 'ms', 'ms', 'ms', '']
     OPTIMIZATION = ['g_syn', 'tau_d', 'tau_r', 'tau_f', 'U', 'Rin', 'Cm']  # keep this order
     MAY_NEED_OPTIMIZATION = ['Cm', 'Rin']
     WORKING_DIRECTORY = '.'
@@ -76,36 +83,35 @@ class Experiment:
         parameters['Cm'] = 100.0
         parameters['g_syn'] = 3.0
         parameters['tau_d'] = 5.0
-        parameters['tau_f'] = 1000.0
-        parameters['tau_r'] = 100.0
+        parameters['tau_f'] = 100.0
+        parameters['tau_r'] = 1000.0
         parameters['U'] = 0.5
 
         parameters['Rin_min'] = 10.0
         parameters['Cm_min'] = 10.0
         parameters['g_syn_min'] = 0.01
         parameters['tau_d_min'] = 0.3
+        parameters['tau_r_min'] = 50.0
         parameters['tau_f_min'] = 1.0
-        parameters['tau_r_min'] = 1.0
-        parameters['U_min'] = 0.001
+        parameters['U_min'] = 10 ** -Experiment.DECIMAL_POINTS
 
         parameters['Rin_max'] = 800.0
         parameters['Cm_max'] = 1200.0
-        parameters['g_syn_max'] = 30.0
+        parameters['g_syn_max'] = 300.0
         parameters['tau_d_max'] = 40.0
-        parameters['tau_f_max'] = 30000.0
-        parameters['tau_r_max'] = 30000.0
-        parameters['U_max'] = 1 - 10**-Experiment.DECIMAL_POINTS
+        parameters['tau_r_max'] = 3000.0
+        parameters['tau_f_max'] = 300.0
+        parameters['U_max'] = 1 - 10 ** -Experiment.DECIMAL_POINTS
 
         parameters['isCmOptimized'] = False
         parameters['isRinOptimized'] = False
 
         json_file = path.join(Experiment.WORKING_DIRECTORY, Experiment.JSONs_FOLDER, file_name + '.json')
         if path.isfile(json_file):
-            best_earlier_optimization = Experiment.get_json_file_as_data_frame(json_file).\
+            best_earlier_optimization = Experiment.get_json_file_as_data_frame(json_file). \
                 sort_values(by=['error']).replace({np.nan: None}).to_dict(orient='records')[0]
             for key in parameters:
-                if key in best_earlier_optimization and best_earlier_optimization[key]:
-                    parameters[key] = best_earlier_optimization[key]
+                parameters[key] = best_earlier_optimization.get(key, parameters[key])
         return parameters
 
     @staticmethod
@@ -140,6 +146,7 @@ class Experiment:
         def chunks(l, n):  # Yield successive n-sized chunks from l.
             for i in range(0, len(l), n):
                 yield l[i:i + n + 1]
+
         data = data_frame.values.tolist()
         data_sliced = list(chunks(data, 3))
         output, weight = [], []
@@ -155,7 +162,8 @@ class Experiment:
                 akima_interpolator = Akima1DInterpolator(t, y)
                 y1_akima, y1_pchip = akima_interpolator(t1), interpolator(t1)
                 y1_amplitude = fabs(data_list[0][0] - data_list[0][0])
-                corrected_data.insert(1, [t1, y1_akima if fabs(y1_akima - data_list[0][0])<y1_amplitude else y1_pchip])
+                corrected_data.insert(1,
+                                      [t1, y1_akima if fabs(y1_akima - data_list[0][0]) < y1_amplitude else y1_pchip])
                 error_weight__.insert(1, interpolated_weight)
             if len(data_list) > 2 and len(y) > 1:
                 t3 = (data_list[2][0] + 15.0 * data_list[1][0]) / 16.0
@@ -173,7 +181,7 @@ class Experiment:
             if len(data_list) > 3 and len(y) > 1:
                 t8 = (data_list[3][0] + data_list[2][0]) / 2.0
                 corrected_data.insert(8, [t8, interpolator(t8)] if (data_list[3][0] - data_list[2][0]) < 100 else
-                                         [data_list[2][0]+100, data_list[3][1]])
+                [data_list[2][0] + 100, data_list[3][1]])
                 error_weight__.insert(8, interpolated_weight)
                 del corrected_data[-1], error_weight__[-1]
             output += corrected_data
@@ -207,7 +215,7 @@ class Experiment:
     @staticmethod
     def plot_saved_results_(file_name, window, amplitude, ppr, isi, recording_mode):
         row, width = 0, 60  # 0, 70
-        font =('Courier New', 18)
+        font = ('Courier New', 18)
         ref_id, location = findall(r'^(\d+)-?(.*)$', file_name)[0]
         json_file = path.join(Experiment.WORKING_DIRECTORY, Experiment.JSONs_FOLDER, file_name + ".json")
         if location:
@@ -238,15 +246,15 @@ class Experiment:
         if recording_mode == "current-clamp":
             keys_colors += [('Rin', 'brown'), ('Cm', 'brown')]
         for row, (key, color) in enumerate(keys_colors, start=1):
-            Label(window, text=key+':', font=font, anchor="e").grid(row=row, column=0, sticky="NEWS")
+            Label(window, text=key + ':', font=font, anchor="e").grid(row=row, column=0, sticky="NEWS")
             entries[key] = EntryWithPlaceholder(master=window, color=color, state='readonly', width=width, font=font)
             entries[key].grid(row=row, column=1, sticky="WE")
         entries['error'].config(state='disabled', disabledforeground='red')
         entries['File'].put_placeholder(file_name)
-        entries['Peak'].put_placeholder("% 9.2f%s" % (amplitude, referencing_stuff))
+        entries['Peak'].put_placeholder("% 9.3f%s" % (amplitude, referencing_stuff))
         if ppr:
-            entries['2/1PPR'].put_placeholder("% 9.2f%s" % (ppr, referencing_stuff))
-            entries['ISI'].put_placeholder("% 6.0f%s" % (isi, referencing_stuff))
+            entries['2/1PPR'].put_placeholder("% 9.3f%s" % (ppr, referencing_stuff))
+            entries['ISI'].put_placeholder("% 6.3f%s" % (isi, referencing_stuff))
             entries['ST-P'].put_placeholder('Facilitating (F), Pseudolinear (F▶D) or No ST-P' if ppr > 1
                                             else 'Depressing (D), Either D or F▶D or No ST-P')
 
@@ -272,7 +280,7 @@ class Experiment:
                 for key in keys:
                     count, mean, std, v_min, p25, p50, p75, v_max = df_description[key]
                     if global_msp == 'SEM':
-                        std = std / count**0.5
+                        std = std / count ** 0.5
                     elif global_msp == 'IQR':
                         std = p75 - p25
                     if global_mct == 'Median':
@@ -293,13 +301,14 @@ class Experiment:
             except FileNotFoundError or PermissionError or TimeoutError:
                 console_print += '  Optimization results available yet to be summarized!\n'
                 pass
-            console_print += '\33[36m  Peak\33[0m:% 11.2f%s\n' % (amplitude, referencing_stuff)
+            console_print += '\33[36m  Peak\33[0m:% 11.3f%s\n' % (amplitude, referencing_stuff)
             if ppr:
-                console_print += '\33[36m2/1PPR\33[0m:% 11.2f%s\n' % (ppr, referencing_stuff)
-                console_print += '\33[36m   ISI\33[0m:% 11.0f%s\n' % (isi, referencing_stuff)
+                console_print += '\33[36m2/1PPR\33[0m:% 11.3f%s\n' % (ppr, referencing_stuff)
+                console_print += '\33[36m   ISI\33[0m:% 11.3f%s\n' % (isi, referencing_stuff)
                 console_print += '\33[36m  ST-P\33[0m:% 11s' % (
                     'Facilitating (F) or Pseudolinear (F▶D)' if ppr > 1 else 'Depressing (D)')
             print(console_print)
+
         set_print_values.entries = entries
         set_print_values.file_name = file_name
         set_print_values.json_file = json_file
@@ -324,7 +333,7 @@ class Experiment:
         Button(self.topButtonFrame, text="Run", command=self.run_model, width=width).grid(
             row=0, column=0)
         self.optimizeFrame = Frame(self.topButtonFrame)
-        self.optimizeButton = Button(self.optimizeFrame, text="Optimize", command=self.optimize, width=width-4)
+        self.optimizeButton = Button(self.optimizeFrame, text="Optimize", command=self.optimize, width=width - 4)
         self.optimizeButton.grid(row=0, column=0)
         self.bootstrap_mode = BooleanVar()
         Checkbutton(self.optimizeFrame, variable=self.bootstrap_mode).grid(row=0, column=1)
@@ -351,38 +360,41 @@ class Experiment:
         self.experimentModeChoice.trace('w', self.mode_change)
         OptionMenu(self.lowerBoxFrame, self.experimentModeChoice, *{'voltage-clamp', 'current-clamp'}).grid(
             row=0, column=1, columnspan=2, sticky='WENS')
-        Button(self.lowerBoxFrame, text="delete json file", command=self.delete_file).grid(row=0, column=3, sticky="NEWS")
+        Button(self.lowerBoxFrame, text="delete json file", command=self.delete_file).grid(
+            row=0, column=3, sticky="NEWS")
         self.entries = dict()
         self.checkButton = dict()
         self.parameterMayNeedOptimization = dict()
         row = 1
         col_width = int(width * 3 / 4)
         for row, key in enumerate(self.KEYS, start=1):
-            unit = ' ('+Experiment.UNITS[row-1]+')' if Experiment.UNITS[row-1] != '' else ''
-            Label(self.lowerBoxFrame, text=key+unit, height=1, justify='left').grid(row=row, column=0, sticky="W")
+            unit = ' (' + Experiment.UNITS[row - 1] + ')' if Experiment.UNITS[row - 1] != '' else ''
+            Label(self.lowerBoxFrame, text=key + unit, height=1, justify='left').grid(row=row, column=0, sticky="W")
             if key in Experiment.OPTIMIZATION:
                 for column, (suffix, color) in enumerate(
                         [('', 'white'), ('_min', 'aliceblue'), ('_max', 'lavenderblush')], start=1):
-                    self.entries[key+suffix] = EntryWithPlaceholder(
+                    self.entries[key + suffix] = EntryWithPlaceholder(
                         master=self.lowerBoxFrame, bd=3, width=col_width, bg=color,
                         validate='all', validatecommand=(Experiment.IS_FLOAT, '%P'))
-                    self.entries[key+suffix].set(round(self.parameters[key+suffix], Experiment.DECIMAL_POINTS))
-                    self.entries[key+suffix].grid(row=row, column=column, sticky='WENS')
+                    self.entries[key + suffix].set(round(self.parameters[key + suffix], Experiment.DECIMAL_POINTS))
+                    self.entries[key + suffix].grid(row=row, column=column, sticky='WENS')
             else:
                 self.entries[key] = EntryWithPlaceholder(
-                    master=self.lowerBoxFrame, bd=3, width=col_width*3,
+                    master=self.lowerBoxFrame, bd=3, width=col_width * 3,
                     validate='all', validatecommand=(Experiment.IS_FLOAT, '%P'))
                 self.entries[key].set(round(self.parameters[key], Experiment.DECIMAL_POINTS))
                 self.entries[key].grid(row=row, column=1, columnspan=3, sticky='WENS')
             if key in Experiment.MAY_NEED_OPTIMIZATION:
                 self.parameterMayNeedOptimization[key] = BooleanVar()
-                self.parameterMayNeedOptimization[key].set(int(self.parameters['is'+key+'Optimized']))
+                self.parameterMayNeedOptimization[key].set(int(self.parameters['is' + key + 'Optimized']))
                 self.checkButton[key] = Checkbutton(self.lowerBoxFrame, variable=self.parameterMayNeedOptimization[key])
                 self.checkButton[key].grid(row=row, column=4, sticky='W')
         self.entries['Vm'].bind("<FocusOut>",
-                                lambda event: self.reload_data()if self.parameters['Mode'] == 'current-clamp' else None)
+                                lambda event: self.reload_data() if self.parameters[
+                                                                        'Mode'] == 'current-clamp' else None)
         self.entries['Vm'].bind("<Return>",
-                                lambda event: self.reload_data()if self.parameters['Mode'] == 'current-clamp' else None)
+                                lambda event: self.reload_data() if self.parameters[
+                                                                        'Mode'] == 'current-clamp' else None)
         self.error, self.optimization_time, self.bootstrap_counter = DoubleVar(), StringVar(), IntVar()
         self.bootstrap_counter.set(0)
         Label(self.lowerBoxFrame, text='Error', height=1).grid(
@@ -470,8 +482,8 @@ class Experiment:
             Experiment.default_mode = "voltage-clamp"
             for key in Experiment.MAY_NEED_OPTIMIZATION:
                 self.entries[key].config(state='readonly')
-                self.entries[key+'_min'].config(state='readonly')
-                self.entries[key+'_max'].config(state='readonly')
+                self.entries[key + '_min'].config(state='readonly')
+                self.entries[key + '_max'].config(state='readonly')
                 self.checkButton[key].config(state='disabled')
         else:
             Experiment.default_mode = "current-clamp"
@@ -502,8 +514,8 @@ class Experiment:
         for key in Experiment.KEYS:
             self.parameters[key] = float(self.entries[key].get())
             if key in Experiment.OPTIMIZATION:
-                self.parameters[key+'_min'] = float(self.entries[key+'_min'].get())
-                self.parameters[key+'_max'] = float(self.entries[key+'_max'].get())
+                self.parameters[key + '_min'] = float(self.entries[key + '_min'].get())
+                self.parameters[key + '_max'] = float(self.entries[key + '_max'].get())
         if round(vm_before, 2) != round(self.parameters['Vm'], 2) and self.parameters['Mode'] == 'current-clamp':
             self.reload_data()
 
@@ -530,7 +542,8 @@ class Experiment:
     def run_model(self, set_error=True):
         self.update_params()
         model_input = [self.parameters[key] for key in self.OPTIMIZATION[0:-2]]
-        bounds = tuple((self.parameters[key+'_min'], self.parameters[key+'_max']) for key in self.OPTIMIZATION[0:-2])
+        bounds = tuple(
+            (self.parameters[key + '_min'], self.parameters[key + '_max']) for key in self.OPTIMIZATION[0:-2])
         if self.parameters['Mode'] == "voltage-clamp":
             model = ExperimentVoltageClamp(
                 self.get_ty_data(), self.get_init_times(), self.parameters['Erev'], self.parameters['Vm'], bounds)
@@ -541,7 +554,7 @@ class Experiment:
             model = ExperimentCurrentClamp(*(input_tuple + (bounds,)))
             if self.parameterMayNeedOptimization['Cm'].get() and self.parameterMayNeedOptimization['Rin'].get():
                 model_input += [self.parameters['Rin'], self.parameters['Cm']]
-                bounds += tuple((self.parameters[key+'_min'], self.parameters[key+'_max']) for key in ['Rin', 'Cm'])
+                bounds += tuple((self.parameters[key + '_min'], self.parameters[key + '_max']) for key in ['Rin', 'Cm'])
                 model = ExperimentCurrentClampRinCm(*(input_tuple + (bounds,)))
             elif self.parameterMayNeedOptimization['Cm'].get():
                 model_input += [self.parameters['Cm']]
@@ -579,7 +592,7 @@ class Experiment:
             MultiProcessOptimization(
                 self.queue, model,
                 1 if self.bootstrap_mode.get() or self.parameters['Mode'] == 'voltage-clamp' else process_numbers.get(),
-                population_size.get()*(
+                population_size.get() * (
                     1 if self.bootstrap_mode.get() or self.parameters['Mode'] == 'voltage-clamp' else 2),
                 self.bootstrap_counter.get(), self.bootstrap_mode.get(), self.FILE_NAME,
                 print_results_when_optimization_ends.get()
@@ -617,7 +630,7 @@ class Experiment:
         self.error.set(round(results.fun, Experiment.DECIMAL_POINTS))
         self.optimization_time.set('%.1f sec' % optimization_time)
         if (self.bootstrap_counter.get() - self.processes_in_the_queue + 1) < bootstrap_max_iteration.get() and \
-            (self.processes_in_the_queue > 1 or self.bootstrap_mode.get()):
+                (self.processes_in_the_queue > 1 or self.bootstrap_mode.get()):
             self.save()
         else:
             self.do_when_optimization_ends(results, corrected_signal)
@@ -663,8 +676,8 @@ class Experiment:
         for key in Experiment.KEYS:
             model_info[key] = [float(self.entries[key].get())]
             if key in Experiment.OPTIMIZATION:
-                model_info[key+'_min'] = [float(self.entries[key+'_min'].get())]
-                model_info[key+'_max'] = [float(self.entries[key+'_max'].get())]
+                model_info[key + '_min'] = [float(self.entries[key + '_min'].get())]
+                model_info[key + '_max'] = [float(self.entries[key + '_max'].get())]
         model_info['error'] = [self.error.get()]
         model_info['isCmOptimized'] = [self.parameterMayNeedOptimization['Cm'].get()]
         model_info['isRinOptimized'] = [self.parameterMayNeedOptimization['Rin'].get()]
@@ -682,13 +695,13 @@ class Experiment:
         init_times = self.get_init_times()
         peak_idx, second_event_start_index = (2, 9) if self.parameters['Mode'] == 'current-clamp' else (1, 3)
         (t0, y0), (t_peak, y_peak) = data[0], data[peak_idx]
-        amplitude, ppr,  isi = y_peak-y0, None, None
+        amplitude, ppr, isi = y_peak - y0, None, None
         if len(data) > (second_event_start_index + peak_idx) and amplitude != 0.0 and len(init_times) > 1:
             second_t0, second_y0 = data[second_event_start_index]
-            second_t_peak, second_y_peak = data[second_event_start_index+peak_idx]
+            second_t_peak, second_y_peak = data[second_event_start_index + peak_idx]
             ppr = abs((second_y_peak - second_y0) / amplitude)
             isi = init_times[1] - init_times[0]
-        Experiment.plot_saved_results_(self.FILE_NAME, Toplevel(self.experimentFrame), amplitude, ppr, isi,
+        Experiment.plot_saved_results_(self.FILE_NAME, Toplevel(master=self.experimentFrame), amplitude, ppr, isi,
                                        self.parameters['Mode'])
 
 
@@ -707,6 +720,7 @@ class MultiProcessOptimization(Process):
 
     def run(self):
         t = time()
+        np.random.seed(int(t * 10 ** 7) % 4294967295)
         results = differential_evolution(
             self.model.simulate,
             bounds=self.model.BOUNDS,  # differential_evolution params
@@ -716,7 +730,7 @@ class MultiProcessOptimization(Process):
             workers=self.thread_numbers,
             popsize=self.population_size,
             maxiter=10000000,
-            tol=10**-Experiment.DECIMAL_POINTS
+            tol=10 ** -(Experiment.DECIMAL_POINTS + 1)
         )
         if self.bootstrap_mode:
             corrected_signal = None
@@ -726,7 +740,7 @@ class MultiProcessOptimization(Process):
         if self.print_results_when_optimization_ends:
             print(
                 '\33[34m error \33[0m % 9.5f' % results.fun,
-                '\33[32m result\33[0m'+str(['% 8.2f' % elem for elem in results.x]),
+                '\33[32m result\33[0m' + str(['% 8.2f' % elem for elem in results.x]),
                 self.FILE_NAME,
                 ('number %d' % self.bootstrap_counter) if self.bootstrap_mode else ''
             )
@@ -743,6 +757,7 @@ def synaptic_event(delta_t, g0, tau_d, tau_r, tau_f, u, u0, x0, y0):
     u0 = u_ + u * (1 - u_)
     y0 = y_ + u0 * x_
     x0 = x_ - u0 * x_
+    # g0 /= u0
     g = g0 * y0
 
     # Original TM Model
@@ -808,7 +823,7 @@ class ExperimentVoltageClamp:
                 error += ExperimentVoltageClamp.soft_l1_loss(signal[-1], data_signal, weight)
             self.simulatedSignal = signal
         error /= self.normalization_value
-        error += ((1 - u/self.BOUNDS[4][1]) * error) if self.num_events == 2 else 0
+        error += ((1 - u / self.BOUNDS[4][1]) * error) if self.num_events == 2 else 0
         return error
 
     def correct_data(self):
@@ -821,7 +836,7 @@ class ExperimentVoltageClamp:
         del init_times[0]
         for idx, dataPoint in enumerate(self.dataList):
             if dataPoint[0] == init_time:
-                real_init_times.append(self.dataList[idx-1][0])
+                real_init_times.append(self.dataList[idx - 1][0])
                 if init_times:
                     init_time = init_times[0]
                     del init_times[0]
@@ -878,7 +893,7 @@ class ExperimentCurrentClamp:
     @staticmethod
     @jit(nopython=True, fastmath=True, cache=True, parallel=False)
     def cell(v, t, g, tau_d, g_leak, e_leak, e_syn):
-        return g_leak * (e_leak - v) + g * exp(-t / tau_d) * (e_syn - v) # + 1.76/46.83 * exp(-t / 37.8945) * (-80.12 - v)
+        return g_leak * (e_leak - v) + g * exp(-t / tau_d) * (e_syn - v)
 
     @staticmethod
     @jit(nopython=True, fastmath=True, cache=True, parallel=False)
@@ -904,7 +919,8 @@ class ExperimentCurrentClamp:
 
     def set_data(self, data_list, weights=None):
         amp = data_list[1][1] - data_list[0][1]  # calculate peak
-        self.normalization_value = (fabs(amp) if amp != 0.0 else 1.0)*(self.num_events if self.num_events != 0 else 1.0)
+        self.normalization_value = (fabs(amp) if amp != 0.0 else 1.0) * (
+            self.num_events if self.num_events != 0 else 1.0)
         self.dataList = data_list.copy()  # format [[t in ms, membrane potential in pA], ]
         self.dataSignal = np.array([data_list[i][1] for i in range(len(data_list))], dtype='float')
         if weights:
@@ -957,12 +973,14 @@ class ExperimentCurrentClamp:
         # calculate error
         error = ExperimentCurrentClamp.sum_soft_l1_loss(self.dataSignal, signal, self.errorWeights)
         error /= self.normalization_value
-        error += (1 - self.U/self.BOUNDS[4][1]) * error if self.num_events == 2 else 0
+        error += (1 - self.U / self.BOUNDS[4][1]) * error if self.num_events == 2 else 0
         self.simulatedSignal = signal
         return error
 
     def correct_data(self):
         # make an array of difference between simulated and recorded initiation times
+        dt_sim_sig_reaches_init_vm = self.tau_d * 10
+        dt_sim_sig_reaches_init_vm += self.membraneCapacitance * self.inputResistance * 10e-3
         init_times = self.initTimes.copy()
         data = self.dataList.copy()
         init_times.append(data[-1][0])
@@ -970,8 +988,10 @@ class ExperimentCurrentClamp:
         del init_times[0]
         simulated_vs_recorded_diff_at_initiation_points = []
         for t, signal, simulated_signal in zip(*zip(*data), self.simulatedSignal):
+            if (t - init_time) < dt_sim_sig_reaches_init_vm:
+                d_signal = simulated_signal - signal
             if t == init_time:
-                simulated_vs_recorded_diff_at_initiation_points.append(simulated_signal - signal)
+                simulated_vs_recorded_diff_at_initiation_points.append(d_signal)
                 if init_times:
                     init_time = init_times[0]
                     del init_times[0]
@@ -994,10 +1014,14 @@ class ExperimentCurrentClamp:
                 corrected_data.append([t, corrected_signal[-1]])
                 continue
 
-            corrected_signal.append(
-                signal +
-                (delta_init_signal * (delta_init_t - delta_t) + delta_init_signal_next * delta_t) / delta_init_t
-            )
+            if delta_t < delta_init_t:
+                correction = (delta_init_signal * (
+                            delta_init_t - delta_t) + delta_init_signal_next * delta_t) / delta_init_t
+
+            if delta_t > 10000:
+                correction = 0
+
+            corrected_signal.append(signal + correction)
             corrected_data.append([t, corrected_signal[-1]])
 
             if len(init_times) > 1 and t >= init_times[0] and len(simulated_vs_recorded_diff_at_initiation_points) > 1:
@@ -1007,6 +1031,9 @@ class ExperimentCurrentClamp:
                 delta_init_signal = simulated_vs_recorded_diff_at_initiation_points[0]
                 del simulated_vs_recorded_diff_at_initiation_points[0]
                 delta_init_signal_next = simulated_vs_recorded_diff_at_initiation_points[0]
+                if delta_init_t > dt_sim_sig_reaches_init_vm:
+                    delta_init_t = dt_sim_sig_reaches_init_vm
+                    # delta_init_signal_next = 0
         if len(corrected_data) == len(data):
             self.set_data(corrected_data)
         else:
@@ -1074,7 +1101,7 @@ class ScrollableFrame(Tk):
     def __init__(self, *args, **kwargs):
         Tk.__init__(self, *args, **kwargs)  # make a window
         self.mainCanvas = Canvas(self, borderwidth=0)
-        self.vertical_scroll_bar = Scrollbar(self, orient='vertical', command=self.mainCanvas.yview, width=10)
+        self.vertical_scroll_bar = Scrollbar(master=self, orient='vertical', command=self.mainCanvas.yview, width=10)
         self.mainCanvas.configure(yscrollcommand=self.vertical_scroll_bar.set)
         self.mainFrame = Frame(self.mainCanvas)
         self.mainWindow = self.mainCanvas.create_window(
@@ -1089,6 +1116,8 @@ class ScrollableFrame(Tk):
         self.mainCanvas.grid(row=0, column=0, sticky="NEWS")
         self.vertical_scroll_bar.grid(row=0, column=1, sticky='NEWS')
         self.mainFrame.columnconfigure(0, weight=1)
+        if not platform.startswith("win"):
+            self.mainFrame.config(padx=10)
 
     def _on_main_frame_configure(self, event):
         # Reset the scroll region to encompass the inner frame
@@ -1127,12 +1156,19 @@ class EntryWithPlaceholder(Entry):
     def __init__(self, master=None, placeholder="PLACEHOLDER", color='blue', *args, **kwargs):
         # super(EntryWithPlaceholder, self).__init__(master)
         Entry.__init__(self, master, *args, **kwargs)
+        self['bg'] = kwargs.get('bg', 'white')
         self.placeholder = placeholder
         self.placeholder_color = color
         self.default_fg_color = self['fg']
+        self.changes = [placeholder]
+        self.steps = 0
         self.bind("<FocusIn>", self.foc_in)
         self.bind("<FocusOut>", self.foc_out)
         self.bind("<ButtonRelease-3>", self.copy_to_clipboard)
+        self.bind("<<Paste>>", EntryWithPlaceholder.custom_paste)
+        self.bind("<Control-z>", self.undo)
+        self.bind("<Control-y>", self.redo)
+        self.bind("<Key>", self.add_changes)
         self.put_placeholder()
 
     def put_placeholder(self, *placeholder):
@@ -1154,10 +1190,22 @@ class EntryWithPlaceholder(Entry):
         try:
             self.clipboard_clear()
             self['fg'] = self.default_fg_color
-            sleep(0.1)
-            self.clipboard_append(self.get_().strip())
+            sleep(0.2)
+            txt = self.get_().strip()
+            self.clipboard_append(txt)  # did not work relyably on Linux
+            copy(txt)
         except TclError:
+            print('TclError: try installing xclip or xsel\n“sudo apt-get install xclip” or “sudo apt-get install xsel”')
             pass
+
+    @staticmethod
+    def custom_paste(event):
+        try:
+            event.widget.delete("sel.first", "sel.last")
+        except:
+            pass
+        event.widget.insert("insert", event.widget.clipboard_get().strip())
+        return "break"
 
     def set(self, txt_or_value):
         state = self['state']
@@ -1173,6 +1221,35 @@ class EntryWithPlaceholder(Entry):
             return ''
         else:
             return self.get()
+
+    def undo(self, event=None):
+
+        if self.steps > 1:
+
+            self.steps -= 1
+
+            self.set(self.changes[self.steps])
+
+
+
+    def redo(self, event=None):
+
+        if self.steps < (len(self.changes)-1):
+
+            self.steps += 1
+
+            self.set(self.changes[self.steps])
+
+
+
+    def add_changes(self, event=None):
+
+        if self.get_() not in [self.changes[self.steps], self.changes[-1], self.placeholder]:
+
+            self.changes.append(self.get_())
+
+            self.steps += 1
+
 
 
 class Main(ScrollableFrame):
@@ -1201,10 +1278,10 @@ class Main(ScrollableFrame):
         self.attributes('-zoomed', True) if platform.startswith("linux") else self.state('zoomed')  # maximize window
         pad = 200  # the pad size of restored window with respect to full screen
         self.geometry("{0}x{1}+{2}+{3}".format(
-            self.winfo_screenwidth()-pad,   # restored window width
-            self.winfo_screenheight()-pad,  # restored window height
-            int(pad/2),                     # restored window position on the center
-            int(pad/2))                     # restored window position on the center
+            self.winfo_screenwidth() - pad,  # restored window width
+            self.winfo_screenheight() - pad,  # restored window height
+            int(pad / 2),  # restored window position on the center
+            int(pad / 2))  # restored window position on the center
         )
         # make content match the frame size
         self.columnconfigure(0, weight=1)
@@ -1214,6 +1291,7 @@ class Main(ScrollableFrame):
         start_menu = Menu(menu, tearoff=0)
         start_menu.add_command(label="Open CSV files", command=self.open)
         start_menu.add_command(label="Create a pseudo-trace", command=self.pseudo_trace)
+        start_menu.add_command(label="Join CSV files", command=self.join_traces)
         menu.add_cascade(label="Start", menu=start_menu)
         menu.add_command(label="Options", command=self.options)
         menu.add_command(label="Calculators", command=self.calculators)
@@ -1243,6 +1321,8 @@ class Main(ScrollableFrame):
 
         # To speedup closing the windows
         self.protocol("WM_DELETE_WINDOW", self.on_exit)
+
+        self.option_window = None
 
     def _get_all_csv_file_names(self):
         data = []
@@ -1305,7 +1385,8 @@ class Main(ScrollableFrame):
                 self.update_scrollbar()
 
     def pseudo_trace(self):
-        window = Toplevel(self)
+        file_name = None
+        window = Toplevel(master=self)
         window.title('Pseudo Trace Generator')
         window.columnconfigure(0, weight=1)
         types, entries, row = dict(), dict(), 0
@@ -1314,7 +1395,7 @@ class Main(ScrollableFrame):
              'options': {'10-90%', '0-100%', '20-80%', 'time constant', 'unspecified'}, 'default': '10-90%'},
             {'type': 'Decay', 'title': 'time', 'unit': 'ms', 'options':
                 {'100-0%', '100-37%', '100-50%', '100-63%', '90-37%', 'time constant', '50-50%', 'unspecified'},
-                'default': 'time constant'},
+             'default': 'time constant'},
             {'type': 'Signal', 'title': 'potency', 'unit': 'mV or pA', 'options': None},
             {'type': 'ISI', 'title': 'time', 'unit': 'ms',
              'options': {'Exponential Interpolation', 'Cubic Interpolation'}, 'default': 'Exponential Interpolation'},
@@ -1352,20 +1433,20 @@ class Main(ScrollableFrame):
             for idx, isi in enumerate(inter_stimulus_intervals, start=0):
                 df = DataFrame({'time': [0], 'signal': [0]})
                 rise_conversion_factor = {
-                    '10-90%': 0.8, '0-100%': 1.0, '20-80%': 0.6, 'time constant': 1-1/e, 'unspecified': 1.0}
+                    '10-90%': 0.8, '0-100%': 1.0, '20-80%': 0.6, 'time constant': 1 - 1 / e, 'unspecified': 1.0}
                 t_rise = float(entries['Rise'].get_()) / rise_conversion_factor.get(types['Rise'].get())
                 a_rise = float(entries['Signal'].get_())
                 df.loc[1] = [t_rise, a_rise]
                 decay_conversion_factor = {
-                    '100-0%': 0.0, '100-37%': 0.37, '100-50%': 0.5, '50-50%': 0.5, '100-63%': 1-1/e, '90-37%': 0.37,
+                    '100-0%': 0.0, '100-37%': 0.37, '100-50%': 0.5, '50-50%': 0.5, '100-63%': 1 - 1 / e, '90-37%': 0.37,
                     'time constant': 0.37, 'unspecified': 0.0}
-                t_decay = (t_rise if types['Decay'].get() != '50-50%' else t_rise/2
+                t_decay = (t_rise if types['Decay'].get() != '50-50%' else t_rise / 2
                            ) + float(entries['Decay'].get_()) * (
-                    1 if types['Decay'].get() != '90-37%' else (1-1/e)/0.57)
+                              1 if types['Decay'].get() != '90-37%' else (1 - 1 / e) / 0.57)
                 a_decay = a_rise * decay_conversion_factor.get(types['Decay'].get())
                 df.loc[2] = [t_decay, a_decay]
                 tau = (t_decay - t_rise) / (log(fabs(a_rise)) - log(fabs(a_decay)))
-                df.loc[3] = [2.0 * t_decay - t_rise, a_rise * exp(-2.0*(t_decay - t_rise) / tau)]
+                df.loc[3] = [2.0 * t_decay - t_rise, a_rise * exp(-2.0 * (t_decay - t_rise) / tau)]
 
                 if isi and isi > t_rise:
                     j = 1.0
@@ -1385,23 +1466,33 @@ class Main(ScrollableFrame):
                             except ValueError or TypeError:
                                 pass
                     if sorted(ppr_as, reverse=True) == ppr_as and types['ISI'].get() == 'Exponential Interpolation':
-                        ppr_tau_initial_guess = (ppr_ts[-1]-ppr_ts[0]) / (log(fabs(ppr_as[0])) - log(fabs(ppr_as[-1])))
-                        ppr_ts_high_res = np.arange(ppr_ts[-1]+1, dtype=float)
+                        ppr_tau_initial_guess = (ppr_ts[-1] - ppr_ts[0]) / (
+                                    log(fabs(ppr_as[0])) - log(fabs(ppr_as[-1])))
+                        ppr_ts_high_res = np.arange(ppr_ts[-1] + 1, dtype=float)
+
+                        if len(ppr_ts) > 2:
+                            ppr_tau_initial_guess = (ppr_ts[-1] - ppr_ts[1]) / (
+                                        log(fabs(ppr_as[1])) - log(fabs(ppr_as[-1])))
+                            ppr_ts_high_res = ppr_ts_high_res[ppr_ts_high_res >= ppr_ts[1]]
+
                         ppr_as_high_res = PchipInterpolator(ppr_ts, ppr_as)(ppr_ts_high_res)
                         ppr_tau, residual = curve_fit(Main.single_exponential_res, ppr_ts_high_res, ppr_as_high_res,
-                                                      p0=(ppr_tau_initial_guess, 0),
-                                                      bounds=((0, 0), (np.inf, np.inf)))[0]
+                                                      # method='lm',
+                                                      p0=(ppr_tau_initial_guess, ppr_as[-1]),
+                                                      bounds=((0, -1), (10000, 1)))[0]
                         plt.plot(ppr_ts_high_res, ppr_as_high_res, 'ro', label='PPR Data')
                         plt.plot(ppr_ts_high_res,
                                  Main.single_exponential_res(ppr_ts_high_res, ppr_tau, residual),
                                  'bo', label='single exp fit')
                         plt.legend()
+                        plt.ion()
                         plt.show(block=False)
-                        plt.annotate('ppr=exp(-t/%f)+%f' % (ppr_tau, residual),
+                        plt.annotate(f'ppr=exp(-t/{ppr_tau:.2f}){"+" if residual > 0 else ""}{residual:.2f}',
                                      xy=(0.5, 0.9), xycoords='figure fraction')
 
                         def interpolator(t):
                             return exp(-(t - ppr_ts[0]) / ppr_tau) + residual
+
                         print('using single exponential interpolator for PPRs')
                     elif len(ppr_as) > 1:
                         ppr_ts += [20 * isi]
@@ -1418,11 +1509,11 @@ class Main(ScrollableFrame):
                             try:
                                 ppr = float(paired_pulse_ratios[idx])
                             except ValueError or TypeError:
-                                ppr = interpolator(i*isi) if interpolator else None
+                                ppr = interpolator(i * isi) if interpolator else None
                         else:
-                            ppr = interpolator(i*isi) if interpolator else None
-                        start_idx, peak_idx = i*3, i*3+1
-                        df.loc[peak_idx] = [i*isi + t_rise, df.loc[start_idx].signal + a_rise * ppr if ppr else None]
+                            ppr = interpolator(i * isi) if interpolator else None
+                        start_idx, peak_idx = i * 3, i * 3 + 1
+                        df.loc[peak_idx] = [i * isi + t_rise, df.loc[start_idx].signal + a_rise * ppr if ppr else None]
 
                         j += 1.0
                         t_decay = df.loc[peak_idx].time + ((i + 1.0) * isi - df.loc[peak_idx].time) / j
@@ -1430,11 +1521,11 @@ class Main(ScrollableFrame):
                             # print('2nd loop', t_decay, (i + 1.0) * isi, t_decay - df.loc[peak_idx].time, tau)
                             j += 0.05
                             t_decay = df.loc[peak_idx].time + ((i + 1.0) * isi - df.loc[peak_idx].time) / j
-                        df.loc[start_idx+2] = [
+                        df.loc[start_idx + 2] = [
                             t_decay,
                             df.loc[peak_idx].signal * exp(-(t_decay - df.loc[peak_idx].time) / tau) if ppr else None]
-                        df.loc[start_idx+3] = [
-                            (i+1.0) * isi,
+                        df.loc[start_idx + 3] = [
+                            (i + 1.0) * isi,
                             df.loc[peak_idx].signal * exp(-(isi - t_rise) / tau) if ppr else None]
                 elif isi and isi <= t_rise:
                     messagebox.showwarning('warning', 'inter-event-interval should be larger than rise time')
@@ -1451,12 +1542,20 @@ class Main(ScrollableFrame):
                 t_last_signal = df.iloc[-2].time
                 df.time += float(tau_r_str) if tau_r_str else 2000.0
                 df.iloc[-3].signal = a_last_signal * exp(-(df.iloc[-3].time - t_last_signal) / tau)
-                df.iloc[-2].signal = df.iloc[-3].signal + a_last_signal + (a_rise - a_last_signal) * (1-1/e)
+                df.iloc[-2].signal = df.iloc[-3].signal + a_last_signal + (a_rise - a_last_signal) * (1 - 1 / e)
                 df.iloc[-1].signal = df.iloc[-2].signal * exp(-(df.iloc[-1].time - df.iloc[-2].time) / tau)
                 all_dfs = all_dfs.append(df)
-            f = filedialog.asksaveasfile(defaultextension=".csv")
+
+            nonlocal file_name
+            f = filedialog.asksaveasfile(
+                parent=window,
+                defaultextension=".csv",
+                initialdir=Experiment.CSVs_FOLDER,
+                initialfile=file_name if file_name else '')
             if f is None:  # asksaveasfile return `None` if dialog closed with "cancel".
                 return
+            else:
+                directory, file_name = path.split(f.name)
             all_dfs.to_csv(f, index=False, line_terminator='\n')
 
         def clear_fields():
@@ -1464,8 +1563,14 @@ class Main(ScrollableFrame):
                 entries[value_['type']].put_placeholder()
 
         def get_data_from_csv():
-            f = filedialog.askopenfilename(defaultextension=".csv")
+            nonlocal file_name
+            f = filedialog.askopenfilename(
+                parent=window,
+                defaultextension=".csv",
+                initialdir=Experiment.CSVs_FOLDER,
+                initialfile=file_name if file_name else '')
             if f:
+                directory, file_name = path.split(f)
                 df = read_csv(f)
                 df = df.rename(columns={
                     df.columns[0]: "time",
@@ -1483,8 +1588,8 @@ class Main(ScrollableFrame):
                 if len(df) > 4:
                     entries['ISI'].set(round(df.loc[3].time - df.loc[0].time, 2))
                 for idx, ppr_index in enumerate(ppr_indices, start=1):
-                    if len(df) > idx*3 + 1:
-                        entries[ppr_index].set(round((df.loc[idx*3 + 1].signal - df.loc[idx*3].signal) / a_rise,
+                    if len(df) > idx * 3 + 1:
+                        entries[ppr_index].set(round((df.loc[idx * 3 + 1].signal - df.loc[idx * 3].signal) / a_rise,
                                                      Experiment.DECIMAL_POINTS))
             window.lift()
 
@@ -1492,36 +1597,72 @@ class Main(ScrollableFrame):
         Button(b_frame, command=get_data_from_csv, text='Read CSV', width=25).grid(row=0, column=0, sticky='NEWS')
         Button(b_frame, command=clear_fields, text='Clear', width=25).grid(row=0, column=1, sticky='NEWS')
         Button(b_frame, command=make_save_pseudo_trace, text='Save CSV', width=25).grid(row=0, column=2, sticky='NEWS')
-        b_frame.grid(row=row+1, column=0, sticky='NEWS')
+        b_frame.grid(row=row + 1, column=0, sticky='NEWS')
+
+    def join_traces(self):
+        import sys
+        from PyQt5.QtWidgets import QFileDialog, QApplication, QWidget
+        joiner_app = QApplication(sys.argv)
+
+        class QFile(QWidget):
+            def __init__(self):
+                super().__init__()
+
+            def open_files(self):
+                return QFileDialog.getOpenFileNames(
+                    self,
+                    'Select files',
+                    './csvs/'
+                    '*.csv',
+                    options=QFileDialog.DontUseNativeDialog)[0]
+
+        files = QFile().open_files()
+        df_list = []
+        for i, file in enumerate(files, start=0):
+            df = read_csv(file)
+            df = df.rename(columns={
+                df.columns[0]: "time",
+                df.columns[1]: "signal"})
+            df.time -= df.time[0]
+            df.time += i * 60000
+            df.signal -= df.signal[0]
+            df_list.append(df)
+
+        f = filedialog.asksaveasfile(defaultextension=".csv")
+        if f is None:  # asksaveasfile return `None` if dialog closed with "cancel".
+            return
+        concat(df_list).to_csv(f, index=False, line_terminator='\n')
 
     def options(self):
-        window = Toplevel(self)
-        window.grab_set()  # make the main window unclickable until closing the settings window
-        window.columnconfigure(1, weight=1)
-        window.geometry('{}x{}'.format(512, 250))
-        Label(window, text='Process numbers:').grid(
+        if self.option_window:
+            self.option_window.destroy()
+        self.option_window = Toplevel(master=self)
+        self.option_window.title('Options')
+        self.option_window.columnconfigure(1, weight=1)
+        self.option_window.geometry('{}x{}'.format(512, 250 if platform.startswith("win") else 170))
+        Label(self.option_window, text='Process numbers:').grid(
             row=0, column=0, sticky="W")
-        Scale(window, from_=1, to=cpu_count(), variable=process_numbers, orient='horizontal').grid(
+        Scale(self.option_window, from_=1, to=cpu_count(), variable=process_numbers, orient='horizontal').grid(
             row=0, column=1, sticky="WE")
-        Label(window, text='Optimizer population size:').grid(
+        Label(self.option_window, text='Optimizer population size:').grid(
             row=1, column=0, sticky="W")
-        Scale(window, from_=15, to=150, variable=population_size, orient='horizontal').grid(
+        Scale(self.option_window, from_=15, to=150, variable=population_size, orient='horizontal').grid(
             row=1, column=1, sticky="WE")
-        Label(window, text='Bootstrap max iteration').grid(
+        Label(self.option_window, text='Bootstrap max iteration').grid(
             row=2, column=0, sticky="W")
-        Scale(window, from_=2, to=100, variable=bootstrap_max_iteration, orient='horizontal').grid(
+        Scale(self.option_window, from_=2, to=100, variable=bootstrap_max_iteration, orient='horizontal').grid(
             row=2, column=1, sticky="WE")
-        Label(window, text='Enable bell sound:').grid(
+        Label(self.option_window, text='Enable bell sound:').grid(
             row=3, column=0, sticky="W")
-        Checkbutton(window, variable=ring_bell_when_optimization_ends).grid(
+        Checkbutton(self.option_window, variable=ring_bell_when_optimization_ends).grid(
             row=3, column=1, sticky="W")
-        Label(window, text='Print each optimization results:').grid(
+        Label(self.option_window, text='Print each optimization results:').grid(
             row=4, column=0, sticky="W")
-        Checkbutton(window, variable=print_results_when_optimization_ends).grid(
+        Checkbutton(self.option_window, variable=print_results_when_optimization_ends).grid(
             row=4, column=1, sticky="W")
-        Label(window, text='Show matrix plot in summary:').grid(
+        Label(self.option_window, text='Show matrix plot in summary:').grid(
             row=5, column=0, sticky="W")
-        Checkbutton(window, variable=show_matrix_plot).grid(
+        Checkbutton(self.option_window, variable=show_matrix_plot).grid(
             row=5, column=1, sticky="W")
 
     def calculators(self):
@@ -1562,13 +1703,14 @@ class Main(ScrollableFrame):
                 mse_v = mse_v / n ** 0.5 / 100
             elif mse == 'IQR':
                 mse_v = mse_v / n ** 0.5 / 1.35 / 100
-            mean = 1-mean/100
+            mean = 1 - mean / 100
             conf_80 = 1.282 * mse_v
             conf_95 = 1.960 * mse_v
             return '80%% = %.3f [%.3f to %.3f], 95%% = %.3f [%.3f to %.3f]' % (
-                mean, mean-conf_80, mean+conf_80, mean, mean-conf_95, mean+conf_95)
+                mean, mean - conf_80, mean + conf_80, mean, mean - conf_95, mean + conf_95)
 
-        window = Toplevel(self.mainFrame)
+        window = Toplevel(master=self)
+        window.title('Calculators')
         msp_frame = Frame(window)
         Label(msp_frame, text='Measure of Spread (MS):').grid(row=0, column=0, sticky='W')
         msp = StringVar(window)
@@ -1642,7 +1784,7 @@ class Main(ScrollableFrame):
 
         def double_exponential_decay(tau1, tau2, a1_ratio):
             t = np.arange(100.0, step=0.1)
-            a2_ratio = 1-a1_ratio
+            a2_ratio = 1 - a1_ratio
             double_exp_f = a1_ratio * np.exp(-t / tau1) + a2_ratio * np.exp(-t / tau2)
             tau = curve_fit(Main.single_exponential_f, t, double_exp_f, 0.5)[0][0]
             plt.plot(t, double_exp_f, 'ro', label='double exp')
@@ -1679,12 +1821,13 @@ if __name__ == '__main__':
     freeze_support()
     app = Main()
     process_numbers = IntVar()
-    process_numbers.set(cpu_count(logical=True) - (0 if cpu_count(logical=False) == cpu_count(logical=True) else 2))
+    # process_numbers.set(cpu_count(logical=True) - (0 if cpu_count(logical=False) == cpu_count(logical=True) else 2))
+    process_numbers.set(cpu_count(logical=True))
     running_processes = 0
     population_size = IntVar()
     population_size.set(15)
     bootstrap_max_iteration = IntVar()
-    bootstrap_max_iteration.set(30)
+    bootstrap_max_iteration.set(15)
     ring_bell_when_optimization_ends = BooleanVar()
     ring_bell_when_optimization_ends.set(True)
     print_results_when_optimization_ends = BooleanVar()
