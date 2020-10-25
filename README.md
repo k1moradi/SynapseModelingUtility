@@ -33,7 +33,7 @@ An example of a digitized trace in Engauge digitizer:
 CSV files should be imported to the program (Start -> Open CSV files). Then users need to set parameters like synaptic reversal potential (Erev), postsynaptic membrane potential (Vm), input resistance (Rin), and capacitance (Cm). You can use entries with blue background to enter the lower bount of the search space and those with pink backround to set the upper bound. After pressing optimize button parameters of Tsodyks Markram are found by optimization techniques. You can save the results in panda compatile JSON format. Saving of multiple optimization results is allowed for bootstrapping purpose.
 
 ### Note:
-(1) This simulator optimizes for the running value of g where g0 = g * U.
-(2) Shortcuts:
+* This simulator optimizes for the running value of g where g0 = g * U.
+* Shortcuts: 
 Open: CTRL + O
 Close: CTRL + w
