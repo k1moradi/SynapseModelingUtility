@@ -25,12 +25,12 @@ psutil, matplotlib, pandas, math, scipy, numba, numpy, sys, os multiprocessing, 
 
 
 ## How to use
-Synaptic traces should be digitized in a specific way. Each synaptic event in a trace should have strictly three points: (1) initiation, (2) peak, and (3) decay points. Digitized traces should be saved as CSV files and put in the csvs folder you made earlier. The first column of CSV file should be the time in milliseconds and the second column synaptic potential in millivolts or current in picoamperes. We encourage using free and open source [Engauge digitizer](https://github.com/markummitchell/engauge-digitizer/releases) for digitization purpose.
+Synaptic traces should be digitized in a specific way. Each synaptic event in a trace should have strictly three points: (1) initiation, (2) peak, and (3) decay points. Digitized traces should be saved as CSV files and put in the csvs folder you made earlier. The first column of CSV file should be time in milliseconds and the second column synaptic potential in millivolts or synaptic current in picoamperes. We encourage using free, open source, and multiplatform [Engauge digitizer](https://github.com/markummitchell/engauge-digitizer/releases) for digitization purpose.
 
 An example of a digitized trace in Engauge digitizer:
 ![image](https://user-images.githubusercontent.com/18602635/59129236-3ca3ff80-893a-11e9-858d-bb6e74625ea6.png)
 
-CSV files should be imported to the program (Start -> Open CSV files). Then users need to set parameters like synaptic reversal potential (Erev), postsynaptic membrane potential (Vm), input resistance (Rin), and capacitance (Cm). You can use entries with blue background to enter the lower bount of the search space and those with pink backround to set the upper bound. After pressing optimize button parameters of Tsodyks Markram are found by optimization techniques. You can save the results in panda compatile JSON format. Saving of multiple optimization results is allowed for bootstrapping purpose.
+CSV files should be imported to the program (Start -> Open CSV files). Then users need to set parameters like synaptic reversal potential (Erev), postsynaptic membrane potential (Vm), input resistance (Rin), and capacitance (Cm). You can use entries with blue background to enter the lower bount of the search space and those with pink backround to set the upper bound. After pressing optimize button parameters of Tsodyks Markram are found by optimization techniques. You can save the results in panda compatile JSON format. Saving of multiple optimization results is allowed for bootstrapping purpose, which can be done automatically by checking the box next to the optimize button.
 
 ### Note:
 * This simulator optimizes and reports the running value of g to increase computational efficiency. To get actual conductance (g0), g should be multiplied by U value, i.e. g0 = g * U.
