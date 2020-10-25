@@ -1,7 +1,7 @@
 # Synapse Modelers Workshop
 A GUI to model synaptic recordings
 
-This GUI helps simulate synaptic electrophysiology recordings efficiently. Currently, it only supports Tsodyks and Markram's short-term plasticity model. Both voltage-clamp and current-clamp traces are supported. We also allow the generation of pseudo-traces knowing measures of synaptic activity like the rise and decay times, and paired-pulse ratios. Parallel optimization of multiple traces is allowed. Modeling and optimization for most traces take a few seconds using parallel processing, analog mathematical solutions and just-in-time compilation of some of the functions.
+This GUI helps simulate synaptic electrophysiology recordings efficiently. Currently, it only supports Tsodyks and Markram's short-term plasticity model. Both voltage-clamp and current-clamp traces are supported. We also allow the generation of pseudo-traces knowing measures of synaptic activity like the rise and decay times, and paired-pulse ratios. Parallel optimization of multiple traces is allowed. Modeling and optimization for most traces take a few seconds using an efficient genetic algorithm, analog mathematical modeling, parallel processing technique, and just-in-time compilation of some of the functions.
 
 ![image](https://user-images.githubusercontent.com/18602635/97099398-da4abc80-165e-11eb-997a-2930a680dffa.png)
 
@@ -31,3 +31,9 @@ An example of a digitized trace in Engauge digitizer:
 ![image](https://user-images.githubusercontent.com/18602635/59129236-3ca3ff80-893a-11e9-858d-bb6e74625ea6.png)
 
 CSV files should be imported to the program (Start -> Open CSV files). Then users need to set parameters like synaptic reversal potential (Erev), postsynaptic membrane potential (Vm), input resistance (Rin), and capacitance (Cm). You can use entries with blue background to enter the lower bount of the search space and those with pink backround to set the upper bound. After pressing optimize button parameters of Tsodyks Markram are found by optimization techniques. You can save the results in panda compatile JSON format. Saving of multiple optimization results is allowed for bootstrapping purpose.
+
+### Note:
+(1) This simulator optimizes for the running value of g where g0 = g * U.
+(2) Shortcuts:
+Open: CTRL + O
+Close: CTRL + w
