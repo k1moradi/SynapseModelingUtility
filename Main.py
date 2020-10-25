@@ -13,9 +13,10 @@ from queue import Empty
 from tkinter import Tk, Menu, filedialog, Canvas, Scrollbar, Toplevel, Scale, messagebox, TclError
 from tkinter import Frame, Button, Checkbutton, Label, Entry, OptionMenu, StringVar, BooleanVar, IntVar, DoubleVar
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-from matplotlib.figure import Figure, rcParams
+from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import matplotlib
+from pylab import rcParams
 from pandas import DataFrame, read_csv, read_json, concat
 from pandas.plotting import scatter_matrix
 from pandas.io.clipboard import copy
@@ -143,9 +144,9 @@ class Experiment:
 
     @staticmethod
     def add_helper_points(data_frame):
-        def chunks(l, n):  # Yield successive n-sized chunks from l.
-            for i in range(0, len(l), n):
-                yield l[i:i + n + 1]
+        def chunks(lst, n):  # Yield successive n-sized chunks from l.
+            for i in range(0, len(lst), n):
+                yield lst[i:i + n + 1]
 
         data = data_frame.values.tolist()
         data_sliced = list(chunks(data, 3))
@@ -156,6 +157,7 @@ class Experiment:
             interpolated_weight = 0.5  # should be less than one
             t = [data_list[i][0] for i in range(len(data_list)) if str(data_list[i][1]) != 'nan']
             y = [data_list[i][1] for i in range(len(data_list)) if str(data_list[i][1]) != 'nan']
+            interpolator = None
             if len(data_list) > 1 and len(y) > 1:
                 t1 = (data_list[1][0] + data_list[0][0]) / 2
                 interpolator = PchipInterpolator(t, y)
@@ -165,7 +167,7 @@ class Experiment:
                 corrected_data.insert(1,
                                       [t1, y1_akima if fabs(y1_akima - data_list[0][0]) < y1_amplitude else y1_pchip])
                 error_weight__.insert(1, interpolated_weight)
-            if len(data_list) > 2 and len(y) > 1:
+            if len(data_list) > 2 and len(y) > 1 and interpolator:
                 t3 = (data_list[2][0] + 15.0 * data_list[1][0]) / 16.0
                 corrected_data.insert(3, [t3, interpolator(t3)])
                 error_weight__.insert(3, interpolated_weight)
@@ -359,8 +361,10 @@ class Experiment:
         self.experimentModeChoice = StringVar(self.lowerBoxFrame, self.parameters['Mode'])
         self.experimentModeChoice.trace('w', self.mode_change)
         OptionMenu(self.lowerBoxFrame, self.experimentModeChoice, *{'voltage-clamp', 'current-clamp'}).grid(
-            row=0, column=1, columnspan=2, sticky='WENS')
+            row=0, column=1, columnspan=1, sticky='WENS')
         Button(self.lowerBoxFrame, text="delete json file", command=self.delete_file).grid(
+            row=0, column=2, sticky="NEWS")
+        Button(self.lowerBoxFrame, text="save traces", command=self.save_traces).grid(
             row=0, column=3, sticky="NEWS")
         self.entries = dict()
         self.checkButton = dict()
@@ -508,6 +512,20 @@ class Experiment:
 
     def delete_file(self):
         Experiment.delete_file_(self.FILE_NAME, '.json', 'Do you want to delete the file?')
+
+    def save_traces(self):
+        f = filedialog.asksaveasfile(
+            parent=self.experimentFrame,
+            defaultextension=".csv",
+            initialdir=Experiment.CSVs_FOLDER,
+            initialfile=self.FILE_NAME + '_traces.csv')
+        if f is None:  # asksaveasfile return `None` if dialog closed with "cancel".
+            return
+        concat([
+            DataFrame(self.plotData.get_xydata(), columns=['time', 'Experiment']),
+            DataFrame(self.plotModel.get_ydata(), columns=['Model']),
+            # DataFrame(self.plotCorrectedSignal.get_ydata(), columns=['Signal.Corrected'])
+        ], axis=1).to_csv(f, index=False, line_terminator='\n')
 
     def update_params(self):
         vm_before = self.parameters['Vm']
