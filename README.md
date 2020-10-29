@@ -1,5 +1,5 @@
 # Synapse Modelers Workshop
-A simulator to reconstruc and model synaptic recordings
+A simulator to reconstruct and model synaptic recordings
 
 This program efficiently simulates synaptic electrophysiology recordings. Currently, it only supports Tsodyks and Markram's short-term plasticity model. Both voltage-clamp and current-clamp traces are supported. It also allows the generation of pseudo-traces knowing measures of synaptic activity like the rise and decay times, and paired-pulse ratios. Parallel optimization of multiple traces is allowed. Modeling and optimization for most traces take a few seconds using an efficient genetic algorithm, analog mathematical modeling, parallel processing technique, and just-in-time compilation of costly functions.
 
