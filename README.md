@@ -1,7 +1,7 @@
-# Synapse Modelers Workshop
+# Synapse Modeling Utility
 A simulator to reconstruct and model synaptic recordings.
 
-This program efficiently simulates synaptic electrophysiology recordings. Currently, it only supports Tsodyks and Markram's short-term plasticity model. Both voltage-clamp and current-clamp traces are supported. It also allows the generation of pseudo-traces knowing measures of synaptic activity like the rise and decay times, and paired-pulse ratios. Parallel optimization of multiple traces is allowed. Modeling and optimization for most traces take a few seconds using an efficient genetic algorithm, analog mathematical modeling, parallel processing technique, and just-in-time compilation of costly functions.
+This program efficiently simulates synaptic electrophysiology recordings. Currently, it only supports Tsodyks, Pawelzik and Markram's short-term plasticity model (Tsodyks, M., Pawelzik, K., and Markram, H. (1998). Neural networks with dynamic synapses. Neural Comput 10, 821-835). Both voltage-clamp and current-clamp traces are supported. For current-clmap simulations synaptic current is injected to a resistor-capcitor circuit as a simple model of biomembranes. This software also allows the generation of pseudo-traces knowing measures of synaptic activity like the rise and decay times, and paired-pulse ratios. Parallel optimization of multiple traces is allowed. Modeling and optimization for most traces take a few seconds using an efficient genetic algorithm, analog mathematical modeling, parallel processing technique, and just-in-time compilation of costly functions.
 
 ![image](https://user-images.githubusercontent.com/18602635/97099398-da4abc80-165e-11eb-997a-2930a680dffa.png)
 
@@ -30,10 +30,10 @@ Synaptic traces should be digitized in a specific way. Each synaptic event in a 
 An example of a digitized trace in Engauge digitizer:
 ![image](https://user-images.githubusercontent.com/18602635/59129236-3ca3ff80-893a-11e9-858d-bb6e74625ea6.png)
 
-CSV files should be imported to the program (Start -> Open CSV files). Then users need to set parameters like synaptic reversal potential (Erev), postsynaptic membrane potential (Vm), input resistance (Rin), and capacitance (Cm). You can use entries with blue background to enter the lower bounds of the search space and those with pink backround to set the upper bounds. After pressing optimize button parameters of Tsodyks Markram are found by optimization techniques. You can save the results in pandas compatile JSON format. Saving multiple optimization results is allowed for bootstrapping purpose, which can be done automatically by checking the box next to the optimize button. After optimization press the summarize button to get an average of saved resutls.
+CSV files should be imported to the program (Start -> Open CSV files). Then users need to set parameters like synaptic reversal potential (Erev), postsynaptic membrane potential (Vm), input resistance (Rin), and capacitance (Cm). You can use entries with blue background to enter the lower bounds of the search space and those with pink backround to set the upper bounds. After pressing optimize button synaptic parameters are found by optimization techniques (differential evolution algorithm). You can save the results in pandas compatile JSON format. Saving multiple optimization results is allowed for bootstrapping purpose, which can be done automatically by checking the box next to the optimize button. After optimization, you can press the summarize button to get an average of saved resutls.
 
 ### Note:
-* This simulator optimizes and reports the running value of g to increase computational efficiency. To get actual conductance (g0), g should be multiplied by U value, i.e. g0 = g * U.
+* To get biological conductance (g_biologocal), optimization g should be multiplied by U value, i.e., g_biologocal = g_optimization * U.
 * Shortcuts: 
 Open: CTRL + O
 Close: CTRL + w
