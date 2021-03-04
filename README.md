@@ -33,7 +33,7 @@ An example of a digitized trace in Engauge Digitizer:
 CSV files should be imported to the program (Start -> Open CSV files). Then users need to set parameters like synaptic reversal potential (Erev), postsynaptic membrane potential (Vm), input resistance (Rin), and capacitance (Cm). You can use entries with blue background to enter the lower bounds of the search space and those with pink backround to set the upper bounds. After pressing optimize button synaptic parameters are found by optimization techniques (differential evolution algorithm). You can save the results in pandas compatile JSON format. Saving multiple optimization results is allowed for bootstrapping purpose, which can be done automatically by checking the box next to the optimize button. After optimization, you can press the summarize button to get an average of saved resutls.
 
 ### Note:
-* To get biological conductance (g), the g_syn value found by optimization should be multiplied by U value, i.e., g = g_syn * U.
+* To get biological conductance (g), the g_syn value found by optimization should be multiplied by U value, i.e., g = g_syn * U. For instance, g is 716.684 * 0.036 = 25.8 (nS) in the above figure.
 * Shortcuts: 
 Open: CTRL + O
 Close: CTRL + w
