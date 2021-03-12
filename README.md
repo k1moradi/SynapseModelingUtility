@@ -36,7 +36,7 @@ An example of a digitized trace in Engauge Digitizer:
 
 You can also reconstruct a trace, knowing the synaptic measures (synaptimetrics). Go to "start" and select "Reconstruct a trace".
 
-![Reconstructor](https://user-images.githubusercontent.com/18602635/110879946-d89b3180-82ab-11eb-9d17-eed0048ce67a.png)
+![Reconstructor](https://user-images.githubusercontent.com/18602635/110882512-0da98300-82b0-11eb-90c7-5c3a3cad1eda.png)
 
 You need to enter the values of amplitude, rise time, and decay time and choose the right synaptometric type for each. If you add ISI and paired-pulse ratio (PPR) values a trace containing multiple synaptic events will be created. On pressing "Save CSV" a synaptic trace is generated. You should save the CSV file in the "csvs" folder, then you can open it. If you enter more than one ISI value separated by commas, then you need to add more than one PPR value, separated by commas as well. In this case, more than one trace is generated, with one-minute inactivity separating them. You may also read a CSV file, which estimates synaptometrics 0%-100% rise time, decay time constant, amplitude, ISI, and PPRs of the first trace. Upon re-reconstruction, some of the slow membrane fluctuations affecting the signals would be eliminated.
 
