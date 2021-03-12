@@ -3,7 +3,7 @@ A simulator to reconstruct and model synaptic recordings.
 
 This program efficiently simulates synaptic electrophysiology recordings. Currently, we only incorporated [Tsodyks, Pawelzik and Markram's short-term plasticity model](https://pubmed.ncbi.nlm.nih.gov/9573407/). Both voltage-clamp and current-clamp traces are supported. Synaptic current is injected to a resistor-capcitor circuit, a simple model of biomembranes, in order to simulate current-clmap condition. This software also allows the reconstruction of traces knowing synaptic measures like the rise and decay times, and paired-pulse ratios. Parallel optimization of multiple traces is allowed. Modeling and optimization for most traces take a few seconds using an efficient genetic algorithm, analog mathematical modeling, parallel processing technique, and just-in-time compilation of costly functions.
 
-![Reconstructor](https://user-images.githubusercontent.com/18602635/110882512-0da98300-82b0-11eb-90c7-5c3a3cad1eda.png)
+![97099398-da4abc80-165e-11eb-997a-2930a680dffa](https://user-images.githubusercontent.com/18602635/108758308-f0875d00-7518-11eb-97f0-6cdbb34c52c0.png)
 
 ## Installation
 The program is tested on standard python 3 [anaconda distribution](https://www.anaconda.com/distribution/). If you use anaconda all the dependencies will be taken care of. Then, just copy Main.py and Data.rar files in a folder on your computer. Extract the data.rar file, which should add two subfolders named "csvs" and "jsons". Run the Main.py via command line with the following command.
