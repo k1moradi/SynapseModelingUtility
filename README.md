@@ -6,7 +6,11 @@ This program efficiently simulates synaptic electrophysiology recordings. Curren
 ![97099398-da4abc80-165e-11eb-997a-2930a680dffa](https://user-images.githubusercontent.com/18602635/108758308-f0875d00-7518-11eb-97f0-6cdbb34c52c0.png)
 
 ## Installation
-The program is tested on standard python 3 [anaconda distribution](https://www.anaconda.com/distribution/). If you use anaconda all the dependencies will be taken care of. Then, just copy Main.py file in a folder on your computer, and create two subfolders named "csvs" and "jsons" in it and run the Main.py.
+The program is tested on standard python 3 [anaconda distribution](https://www.anaconda.com/distribution/). If you use anaconda all the dependencies will be taken care of. Then, just copy Main.py and Data.rar files in a folder on your computer. Extract the data.rar file, which should add two subfolders named "csvs" and "jsons". Run the Main.py via command line with the following command.
+
+```{cmd}
+> python Main.py
+```
 
 ## Module Dependencies:
 psutil, matplotlib, pandas, math, scipy, numba, numpy, sys, os multiprocessing, queue, tkinter, re, and time.
@@ -29,6 +33,8 @@ Synaptic traces should be digitized in a specific way. Each synaptic event in a 
 
 An example of a digitized trace in Engauge Digitizer:
 ![image](https://user-images.githubusercontent.com/18602635/59129236-3ca3ff80-893a-11e9-858d-bb6e74625ea6.png)
+
+You can also reconstruct a trace knowing the synaptic measures (synaptimetrics). 
 
 CSV files should be imported to the program (Start -> Open CSV files). Then users need to set parameters like synaptic reversal potential (Erev), postsynaptic membrane potential (Vm), input resistance (Rin), and capacitance (Cm). You can use entries with blue background to enter the lower bounds of the search space and those with pink backround to set the upper bounds. After pressing optimize button synaptic parameters are found by optimization techniques (differential evolution algorithm). You can save the results in pandas compatile JSON format. Saving multiple optimization results is allowed for bootstrapping purpose, which can be done automatically by checking the box next to the optimize button. After optimization, you can press the summarize button to get an average of saved resutls.
 
