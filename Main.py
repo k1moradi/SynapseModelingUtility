@@ -419,9 +419,9 @@ class Experiment:
         self.subplot = self.fig.add_subplot(111)  # n_rows, n_cols, index
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.experimentFrame)
         self.canvas.get_tk_widget().grid(row=0, column=0, rowspan=len(self.KEYS), sticky='NEWS')
-        self.plotData, = self.subplot.plot([], [], '--bo', color='#1772AE', label='Data')  # blue
+        self.plotData, = self.subplot.plot([], [], '--o', color='#1772AE', label='Data')  # blue
         self.plotModel, = self.subplot.plot([], [], ':X', color='#D05F2C', label='Model')  # red
-        self.plotCorrectedSignal, = self.subplot.plot([], [], '-.bo', color='#13A075', label='Corrected Data')  # green
+        self.plotCorrectedSignal, = self.subplot.plot([], [], '-.o', color='#13A075', label='Corrected Data')  # green
         self.plotInitTimes, = self.subplot.plot([], [], 'P', color='#CB78A6', label='Init')  # magenta
         self.fig.patch.set_facecolor('#F0F0F0')  # light grey
         self.subplot.set_facecolor('#F0F0F0')
