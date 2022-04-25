@@ -6,7 +6,7 @@ This program efficiently simulates synaptic electrophysiology recordings. Curren
 ![97099398-da4abc80-165e-11eb-997a-2930a680dffa](https://user-images.githubusercontent.com/18602635/108758308-f0875d00-7518-11eb-97f0-6cdbb34c52c0.png)
 
 ## Installation
-The program is tested on standard python 3 [anaconda distribution](https://www.anaconda.com/distribution/). If you use anaconda all the dependencies will be taken care of. Then, just copy Main.py and Data.rar files in a folder on your computer. Extract the data.rar file, which should add two subfolders named "csvs" and "jsons". Run the Main.py via command line with the following command.
+The program is tested on standard python 3 [anaconda distribution](https://www.anaconda.com/distribution/). If you use anaconda all the dependencies will be taken care of. Then, just copy Main.py and Data.rar files in a folder on your computer. Run the Main.py via command line with the following command.
 
 ```{cmd}
 > python Main.py
