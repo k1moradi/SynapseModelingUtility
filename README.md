@@ -9,6 +9,8 @@ This program efficiently simulates synaptic electrophysiology recordings. Curren
 The program is tested on standard python 3 [anaconda distribution](https://www.anaconda.com/distribution/). If you use anaconda all the dependencies will be taken care of. Then, just pull the repo with git command and run the Main.py via command line with the following command.
 
 ```{cmd}
+> conda create -n synapse -c conda-forge Python=3.7.* psutil=5.6.* matplotlib=3.1.* pandas=0.24.* scipy=1.2.* numba=0.43.* numpy=1.16.* tk=8.6.* PyQt=5.*.*
+> conda activate synapse
 > python Main.py
 ```
 
